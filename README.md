@@ -1,4 +1,4 @@
-# VINote Mobile
+# vinoteAPP
 
 VINote 的原生移动客户端仓库。
 
@@ -17,4 +17,4 @@ VINote 的原生移动客户端仓库。
 
 主项目仓库：<https://github.com/orulink-ai/VINote>
 
-本仓库作为独立 Git 仓库维护，并通过 Git submodule 关联到 VINote 父仓库的 `VINote-Mobile/` 目录。父仓库记录经过确认的移动端提交版本。
+本仓库作为独立 Git 仓库维护，并通过 Git submodule 关联到 VINote 父仓库的 `vinoteAPP/` 目录。父仓库记录经过确认的 App 提交版本。
