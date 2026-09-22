@@ -1,20 +1,31 @@
 # VINote App
 
-VINote 的原生移动客户端仓库。
+VINote 的 React Native 原生移动端，使用 Community CLI，不使用 Expo 管理工作流，同时支持 Android 与 iOS。
 
-## 当前阶段
+首期闭环包含：
 
-仓库目前仅完成初始化，用于确认独立仓库、父项目关联方式和后续提交历史。React Native 技术选型与业务代码将在方案讨论完成后开始。
+- 账号登录与注册
+- 原生麦克风录音
+- 上传录音并在云端生成会议纪要
+- 查看会议纪要列表和详情
 
-## 计划边界
+账号和笔记复用 VINote FastAPI 及现有数据库。登录响应同时提供桌面端 Cookie 和移动端 Bearer Token；App 将 Token 保存到系统安全存储后访问同一套业务接口。移动端拥有独立的视觉和交互。
 
-- 使用 React Native 原生工程，不使用 Expo。
-- 面向 iOS 与 Android。
-- 复用 VINote 现有后端服务和产品视觉语言。
-- 移动端拥有独立版本、构建流程和发布流程。
+## 本地运行
 
-## 与父项目的关系
+```bash
+npm install
+npm start
+npm run android
+```
 
-主项目仓库：<https://github.com/orulink-ai/VINote>
+Android 模拟器默认访问 `http://10.0.2.2:8900`，iOS 模拟器默认访问 `http://127.0.0.1:8900`。真实设备请把 `src/config/env.ts` 中的地址改为电脑局域网 IP，并确保后端监听 `0.0.0.0`。
 
-本仓库作为独立 Git 仓库维护，并通过 Git submodule 关联到 VINote 父仓库的 `VINote-app/` 目录。父仓库记录经过确认的 App 提交版本。
+首次安装原生依赖后，iOS 需要执行：
+
+```bash
+cd ios
+pod install
+```
+
+父项目仓库通过 Git submodule 关联本仓库的 `VINote-app/` 目录。
