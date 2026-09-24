@@ -7,7 +7,16 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "config:check": "node scripts/validate-deployment.cjs",
+    "preandroid": "npm run config:check",
+    "preios": "npm run config:check",
+    "prestart": "npm run config:check",
+    "typecheck": "tsc --noEmit",
+    "test:scripts": "node --test scripts/*.test.cjs",
+    "android:standalone": "node scripts/android-build.cjs standalone",
+    "android:release": "node scripts/android-build.cjs release",
+    "android:bundle": "node scripts/android-build.cjs bundle"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^3.1.1",

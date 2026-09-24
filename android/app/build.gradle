@@ -2,6 +2,25 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+// 增量原生构建也检查部署配置，不依赖 Babel 缓存失效。
+providers.exec {
+    workingDir rootProject.projectDir.parentFile
+    commandLine 'node', 'scripts/validate-deployment.cjs'
+}.result.get().assertNormalExitValue()
+def releaseStore = System.getenv('VINOTE_ANDROID_KEYSTORE')
+def releaseStorePassword = System.getenv('VINOTE_ANDROID_STORE_PASSWORD')
+def releaseKeyAlias = System.getenv('VINOTE_ANDROID_KEY_ALIAS')
+def releaseKeyPassword = System.getenv('VINOTE_ANDROID_KEY_PASSWORD')
+def releaseSigningReady = [releaseStore, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].every { it }
+if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') } && !releaseSigningReady) {
+    throw new GradleException('Release requires VINOTE_ANDROID_KEYSTORE, VINOTE_ANDROID_STORE_PASSWORD, VINOTE_ANDROID_KEY_ALIAS and VINOTE_ANDROID_KEY_PASSWORD')
+}
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.project == project && it.name.toLowerCase().contains('release') } && !releaseSigningReady) {
+        throw new GradleException('Release requires VINOTE_ANDROID_KEYSTORE, VINOTE_ANDROID_STORE_PASSWORD, VINOTE_ANDROID_KEY_ALIAS and VINOTE_ANDROID_KEY_PASSWORD')
+    }
+}
+
 def deployment = new groovy.json.JsonSlurper().parse(file("../../config/deployment.json"))
 if (!(deployment.accountProxyHost ==~ /[a-zA-Z0-9.-]*/)) throw new GradleException("Invalid proxy host")
 
@@ -94,9 +113,17 @@ android {
         buildConfigField 'boolean', 'VINOTE_STANDALONE', project.hasProperty('vinoteStandalone') ? 'true' : 'false'
     }
     buildTypes.each { buildType ->
-        buildType.manifestPlaceholders.usesCleartextTraffic = buildType.name == 'debug'
+        buildType.manifestPlaceholders.usesCleartextTraffic = deployment.channel == 'lan'
     }
     signingConfigs {
+        release {
+            if (releaseSigningReady) {
+                storeFile file(releaseStore)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
         debug {
             storeFile file('debug.keystore')
             storePassword 'android'
@@ -109,9 +136,8 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // 正式包必须由部署方签名，不能静默使用调试证书。
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
