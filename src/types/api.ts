@@ -8,6 +8,7 @@ export type Note = {
   content: string
   task_id?: string | null
   source_type?: string | null
+  generation_client?: 'mobile' | 'desktop' | 'web' | null
   status: string
   created_at: string
   updated_at: string

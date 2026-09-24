@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform } from 'react-native'
+import { PermissionsAndroid, Platform, NativeModules } from 'react-native'
 import Sound from 'react-native-nitro-sound'
 
 export async function requestRecordingPermission() {
@@ -10,16 +10,26 @@ export async function requestRecordingPermission() {
   return result === PermissionsAndroid.RESULTS.GRANTED
 }
 
-export async function startRecording() {
+export async function startRecording(path: string) {
   const allowed = await requestRecordingPermission()
   if (!allowed) throw new Error('请允许 VINote 使用麦克风')
-  return Sound.startRecorder(undefined, { AudioSamplingRate: 44100, AudioEncodingBitRate: 128000, AudioChannels: 1 })
+  if (Platform.OS === 'android') await NativeModules.RecordingBackground.start()
+  try {
+    return await Sound.startRecorder(path.replace('file://', ''), { AudioSamplingRate: 44100, AudioEncodingBitRate: 128000, AudioChannels: 1 })
+  } catch (error) {
+    if (Platform.OS === 'android') await NativeModules.RecordingBackground.stop()
+    throw error
+  }
 }
 
 export async function stopRecording() {
-  const path = await Sound.stopRecorder()
-  Sound.removeRecordBackListener()
-  return path.startsWith('file://') ? path : `file://${path}`
+  try {
+    const path = await Sound.stopRecorder()
+    return path.startsWith('file://') ? path : `file://${path}`
+  } finally {
+    Sound.removeRecordBackListener()
+    if (Platform.OS === 'android') await NativeModules.RecordingBackground.stop()
+  }
 }
 
 export function listenRecording(onTick: (milliseconds: number) => void) {
