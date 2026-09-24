@@ -1,8 +1,10 @@
 import FS from 'react-native-fs'
 import { readAccountId } from '../src/lib/storage'
-import { recordingPath, saveRecording, listRecordings, createRecordingDraft, finalizeRecording, importRecording } from '../src/features/recording/recordingLibrary'
+import { recordingPath, saveRecording, listRecordings, createRecordingDraft, finalizeRecording, importRecording, unlinkRecordingNote } from '../src/features/recording/recordingLibrary'
+import { listNotes } from '../src/lib/notes'
 import { NativeModules } from 'react-native'
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn() }))
+jest.mock('../src/lib/notes', () => ({ listNotes: jest.fn(async () => []) }))
 beforeEach(() => { jest.clearAllMocks(); jest.mocked(FS.exists).mockResolvedValue(false) })
 
 test('draft survives missing audio and failed finalization does not erase metadata', async () => {
@@ -44,4 +46,24 @@ test('unknown legacy account cannot read device-wide recordings', async () => {
   jest.mocked(readAccountId).mockResolvedValue(null)
   await expect(listRecordings()).rejects.toThrow('请联网登录一次')
   expect(FS.readDir).not.toHaveBeenCalled()
+})
+test('deleting the latest note retains its version number in recording metadata', async () => {
+  jest.mocked(readAccountId).mockResolvedValue('alice')
+  jest.mocked(listNotes).mockResolvedValue([{ id: 'app-one-v2', task_id: 'one', version: 2 }] as never)
+  jest.mocked(FS.exists).mockResolvedValue(true)
+  jest.mocked(FS.readDir).mockResolvedValue([{ name: 'one.json', path: '/metadata/one.json' }] as never)
+  jest.mocked(FS.readFile).mockResolvedValue(JSON.stringify({ id: 'one', uri: 'file:///documents/recordings/accounts/alice/one.m4a', title: '会议', createdAt: '', duration: 10, noteId: 'app-one-v3' }))
+  await unlinkRecordingNote('app-one-v3', 3)
+  const written = jest.mocked(FS.writeFile).mock.calls.at(-1)?.[1] as string
+  expect(JSON.parse(written)).toMatchObject({ noteId: 'app-one-v2', lastNoteVersion: 3 })
+})
+test('deleting a version still updates history when the latest-note pointer is stale', async () => {
+  jest.mocked(readAccountId).mockResolvedValue('alice')
+  jest.mocked(listNotes).mockResolvedValue([{ id: 'app-one-v2', task_id: 'one', version: 2 }] as never)
+  jest.mocked(FS.exists).mockResolvedValue(true)
+  jest.mocked(FS.readDir).mockResolvedValue([{ name: 'one.json', path: '/metadata/one.json' }] as never)
+  jest.mocked(FS.readFile).mockResolvedValue(JSON.stringify({ id: 'one', uri: 'file:///documents/recordings/accounts/alice/one.m4a', title: '会议', createdAt: '', duration: 10, noteId: 'app-one-v2' }))
+  await unlinkRecordingNote('app-one-v3', 3, 'one')
+  const written = jest.mocked(FS.writeFile).mock.calls.at(-1)?.[1] as string
+  expect(JSON.parse(written)).toMatchObject({ noteId: 'app-one-v2', lastNoteVersion: 3 })
 })

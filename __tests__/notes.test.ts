@@ -24,6 +24,12 @@ test('each generation of the same audio keeps an independent numbered note', asy
   expect((await listNotes()).filter(note => note.task_id === 'record-version')).toHaveLength(2)
   expect((await getNote(first.id)).content).toBe('# 第一版')
 })
+test('creating an occupied version never overwrites the previous note', async () => {
+  jest.mocked(readAccountId).mockResolvedValue('alice')
+  const first = await createNote({ title: '录音', content: '# 原纪要', task_id: 'collision' }, 'alice', 1)
+  await expect(createNote({ title: '录音', content: '# 新纪要', task_id: 'collision' }, 'alice', 1)).rejects.toThrow('已存在')
+  expect((await getNote(first.id)).content).toBe('# 原纪要')
+})
 test('shares the selected version as a Markdown file kept available for the receiving app', async () => {
   jest.mocked(readAccountId).mockResolvedValue('alice')
   const note = await createNote({ title: '客户/会议', content: '# 第二版\n行动项', task_id: 'share-version' }, 'alice', 2)

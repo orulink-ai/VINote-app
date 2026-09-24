@@ -1,4 +1,4 @@
-import { createNote, nextNoteVersion } from '../../lib/notes'
+import { createNote, getNote, nextNoteVersion, noteIdForVersion } from '../../lib/notes'
 import { transcribe, summarize } from '../../lib/meetingCloud'
 import { loadModels, loadSelection } from '../../lib/models'
 import { readAccountId } from '../../lib/storage'
@@ -19,6 +19,19 @@ export async function generateRecording(record: LocalRecording, progress: (text:
     if (await readAccountId() !== owner) throw new Error('账号已切换，处理已停止；已完成进度保留在原账号')
   }
   try {
+    if (record.generation?.version) {
+      let savedNote
+      try { savedNote = await getNote(noteIdForVersion(record.id, record.generation.version)) }
+      catch (error) { if (!(error instanceof ApiError && error.status === 404)) throw error }
+      if (savedNote) {
+        if (savedNote.task_id !== record.id) throw new Error('已保存纪要与录音不匹配，请检查本机数据')
+        await guard()
+        await saveRecording({ ...record, noteId: savedNote.id,
+          lastNoteVersion: Math.max(record.lastNoteVersion || 0, record.generation.version),
+          generation: undefined, error: undefined })
+        return savedNote.id
+      }
+    }
     const selection = resume && record.generation
       ? { asr_model: record.generation.asrModel, llm_model: record.generation.llmModel }
       : await loadSelection()
@@ -26,7 +39,7 @@ export async function generateRecording(record: LocalRecording, progress: (text:
     for (const kind of ['asr', 'llm'] as const) {
       if (!models.some(m => m.id === selection[`${kind}_model`] && m.modelType === kind && m.runtimeStatus === 'available')) throw new Error('所选模型不可用，请重新选择云端模型')
     }
-    const version = record.generation?.version || await nextNoteVersion(record.id)
+    const version = record.generation?.version || Math.max((record.lastNoteVersion || 0) + 1, await nextNoteVersion(record.id))
     current = { ...record, taskId: undefined, error: undefined, summaryCheckpoint: record.generation ? record.summaryCheckpoint : undefined,
       generation: { status: 'pending', asrModel: selection.asr_model, llmModel: selection.llm_model,
         startedAt: record.generation?.startedAt || new Date().toISOString(), version } }
@@ -60,7 +73,8 @@ export async function generateRecording(record: LocalRecording, progress: (text:
     const topic = summaryTopic(content)
     if (current.titleSource === 'default' && topic) current = { ...current, title: recordingTitle(current.createdAt, topic), titleSource: 'ai' }
     const note = await createNote({ title: current.title, content, task_id: record.id }, owner, version)
-    await saveRecording({ ...current, noteId: note.id, llmModel: selection.llm_model, generation: undefined })
+    await saveRecording({ ...current, noteId: note.id, lastNoteVersion: Math.max(current.lastNoteVersion || 0, version),
+      llmModel: selection.llm_model, generation: undefined })
     return note.id
   } catch (error) {
     const transient = error instanceof TransportError || (error instanceof ApiError && [502, 503, 504].includes(error.status))

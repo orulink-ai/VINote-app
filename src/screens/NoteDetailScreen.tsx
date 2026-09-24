@@ -29,7 +29,7 @@ export function NoteDetailScreen({ id, onBack, backLabel = '纪要列表' }: { i
     { text: '取消', style: 'cancel' },
     { text: '删除纪要', style: 'destructive', onPress: async () => {
       setDeleting(true)
-      try { await deleteNote(id); try { await unlinkRecordingNote(id) } catch { Alert.alert('纪要已删除', '本机录音关联更新失败，再次查看时会自动检查。') } onBack() }
+      try { await deleteNote(id); try { await unlinkRecordingNote(id, note?.version || 1, note?.task_id) } catch { Alert.alert('纪要已删除', '本机录音关联更新失败，再次查看时会自动检查。') } onBack() }
       catch (e) { Alert.alert('删除失败', e instanceof Error ? e.message : '请稍后重试'); setDeleting(false) }
     } },
   ])

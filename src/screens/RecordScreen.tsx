@@ -8,6 +8,7 @@ import { colors, styles } from '../design-system/theme'
 import { listenRecording, startRecording, stopRecording } from '../features/recording/recordingService'
 import { LocalRecording, saveRecording, createRecordingDraft, finalizeRecording } from '../features/recording/recordingLibrary'
 import { generateRecording } from '../features/recording/generateRecording'
+import { recordingElapsedSeconds } from '../features/recording/recordingTimer'
 export function RecordScreen({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
   const [mode, setMode] = useState<'audio' | 'minutes'>('audio')
   const [title, setTitle] = useState('')
@@ -19,7 +20,20 @@ export function RecordScreen({ onDone, onBack }: { onDone: () => void; onBack: (
   const [pending, setPending] = useState<LocalRecording | null>(null)
   const lock = useRef(false)
   const draft = useRef<LocalRecording | null>(null)
-  useEffect(() => recording ? listenRecording(ms => setSeconds(Math.floor(ms / 1000))) : undefined, [recording])
+  const recordingStartedAt = useRef<number | null>(null)
+  useEffect(() => {
+    if (!recording) return
+    const updateElapsed = () => {
+      if (recordingStartedAt.current === null) return
+      setSeconds(previous => recordingElapsedSeconds(recordingStartedAt.current!, Date.now(), previous))
+    }
+    // The recorder callback can report a negative position on iOS. It only
+    // triggers a refresh; the displayed duration comes from our own clock.
+    const stopListening = listenRecording(updateElapsed)
+    const timer = setInterval(updateElapsed, 1000)
+    updateElapsed()
+    return () => { stopListening(); clearInterval(timer) }
+  }, [recording])
   useEffect(() => {
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
       if (recording || busy || pending) Alert.alert('当前录音尚未完成', '请先结束并保存录音。处理失败后可在录音库重试。')
@@ -34,9 +48,11 @@ export function RecordScreen({ onDone, onBack }: { onDone: () => void; onBack: (
     try {
       draft.current = await createRecordingDraft(title)
       await startRecording(draft.current.uri)
+      recordingStartedAt.current = Date.now()
       setSeconds(0); setRecording(true)
     }
     catch (e) {
+      recordingStartedAt.current = null
       if (draft.current) await saveRecording({ ...draft.current, state: 'interrupted', error: '录音未能开始，请检查麦克风权限后新建录音' }).catch(() => {})
       Alert.alert('无法录音', e instanceof Error ? e.message : '请检查麦克风权限')
     }
@@ -47,19 +63,23 @@ export function RecordScreen({ onDone, onBack }: { onDone: () => void; onBack: (
     lock.current = true; setBusy(true); setPhase('正在保存原始录音…')
     let saved: LocalRecording | null = null
     try {
+      const elapsed = recordingStartedAt.current === null ? seconds
+        : recordingElapsedSeconds(recordingStartedAt.current, Date.now(), seconds)
       if (!pending) {
         if (!draft.current) throw new Error('未找到录音草稿')
         try { await stopRecording() } catch {
           // 停止返回值可能丢失；使用开始时已持久化的路径尝试找回文件。
-          const interrupted = { ...draft.current, duration: seconds, state: 'interrupted' as const, error: '录音异常结束，请播放检查后再生成纪要' }
+          const interrupted = { ...draft.current, duration: elapsed, state: 'interrupted' as const, error: '录音异常结束，请播放检查后再生成纪要' }
           await saveRecording(interrupted)
+          recordingStartedAt.current = null
           setRecording(false); setPending(null)
           Alert.alert('录音中断', '已保留录音记录和可用文件，请到录音库检查。', [{ text: '前往录音库', onPress: onDone }])
           return
         }
       }
       setRecording(false)
-      const record = pending || { ...draft.current!, duration: seconds,
+      recordingStartedAt.current = null
+      const record = pending || { ...draft.current!, duration: elapsed,
         title: title.trim() || draft.current!.title, titleSource: title.trim() ? 'manual' as const : draft.current!.titleSource }
       setPending(record)
       saved = await finalizeRecording(record)

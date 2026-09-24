@@ -1,15 +1,21 @@
 import { generateRecording, resumePendingRecordings } from '../src/features/recording/generateRecording'
 import { listRecordings, saveRecording } from '../src/features/recording/recordingLibrary'
 import { transcribe, summarize } from '../src/lib/meetingCloud'
-import { createNote, nextNoteVersion } from '../src/lib/notes'
+import { createNote, getNote, nextNoteVersion } from '../src/lib/notes'
+import { ApiError } from '../src/lib/errors'
 import { TransportError } from '../src/lib/errors'
+import { loadModels } from '../src/lib/models'
 jest.mock('../src/features/recording/recordingLibrary', () => ({ saveRecording: jest.fn(async value => value), listRecordings: jest.fn(async () => []) }))
 jest.mock('../src/lib/meetingCloud', () => ({ transcribe: jest.fn(), summarize: jest.fn() }))
-jest.mock('../src/lib/notes', () => ({ createNote: jest.fn(), nextNoteVersion: jest.fn(async () => 1) }))
+jest.mock('../src/lib/notes', () => ({ createNote: jest.fn(), getNote: jest.fn(), nextNoteVersion: jest.fn(async () => 1), noteIdForVersion: jest.fn((id, version) => `app-${id}${version === 1 ? '' : `-v${version}`}`) }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'alice') }))
 jest.mock('../src/lib/models', () => ({ loadSelection: jest.fn(async () => ({ asr_model: 'asr1', llm_model: 'llm1' })), loadModels: jest.fn(async () => [{ id: 'asr1', modelType: 'asr', runtimeStatus: 'available' }, { id: 'llm1', modelType: 'llm', runtimeStatus: 'available' }]) }))
 
-beforeEach(() => { jest.clearAllMocks(); jest.mocked(nextNoteVersion).mockResolvedValue(1) })
+beforeEach(() => {
+  jest.clearAllMocks()
+  jest.mocked(nextNoteVersion).mockResolvedValue(1)
+  jest.mocked(getNote).mockRejectedValue(new ApiError('本机未找到这份纪要', 404))
+})
 test('AI topic replaces only automatic titles, never manual names', async () => {
   jest.mocked(summarize).mockResolvedValue('# 产品发布安排与职责确认\n内容')
   jest.mocked(createNote).mockResolvedValue({ id: 'app-title' } as never)
@@ -67,4 +73,26 @@ test('another summary of the same recording uses a new version and fresh summary
   expect(summarize).toHaveBeenCalledWith('完整转写', '会议', 'llm1', expect.objectContaining({ checkpoint: undefined }))
   expect(createNote).toHaveBeenCalledWith(expect.objectContaining({ task_id: 'repeat' }), 'alice', 2)
   expect(saveRecording).toHaveBeenLastCalledWith(expect.objectContaining({ noteId: 'app-repeat-v2', generation: undefined }))
+})
+test('deleting the latest note does not reuse its version number', async () => {
+  jest.mocked(nextNoteVersion).mockResolvedValue(2)
+  jest.mocked(summarize).mockResolvedValue('# 第三版')
+  jest.mocked(createNote).mockResolvedValue({ id: 'app-repeat-v3' } as never)
+  const record = { id: 'repeat', uri: 'file:///repeat.m4a', title: '会议', createdAt: '', duration: 600,
+    transcript: '完整转写', asrModel: 'asr1', lastNoteVersion: 2 }
+  await generateRecording(record, jest.fn())
+  expect(createNote).toHaveBeenCalledWith(expect.objectContaining({ task_id: 'repeat' }), 'alice', 3)
+  expect(saveRecording).toHaveBeenLastCalledWith(expect.objectContaining({ noteId: 'app-repeat-v3', lastNoteVersion: 3 }))
+})
+test('a saved note is linked on recovery without overwriting or regenerating it', async () => {
+  const note = { id: 'app-recovered-v2', task_id: 'recovered', version: 2, content: '# 原纪要' }
+  jest.mocked(getNote).mockResolvedValue(note as never)
+  jest.mocked(loadModels).mockRejectedValueOnce(new TransportError('暂时断网'))
+  const record = { id: 'recovered', uri: 'file:///recovered.m4a', title: '会议', createdAt: '', duration: 600,
+    transcript: '完整转写', asrModel: 'asr1', generation: { status: 'pending' as const, asrModel: 'asr1', llmModel: 'llm1', startedAt: '', version: 2 } }
+  await expect(generateRecording(record, jest.fn(), true)).resolves.toBe(note.id)
+  expect(summarize).not.toHaveBeenCalled()
+  expect(loadModels).not.toHaveBeenCalled()
+  expect(createNote).not.toHaveBeenCalled()
+  expect(saveRecording).toHaveBeenLastCalledWith(expect.objectContaining({ noteId: note.id, lastNoteVersion: 2, generation: undefined }))
 })

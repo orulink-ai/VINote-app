@@ -32,14 +32,20 @@ export async function nextNoteVersion(taskId: string) {
   const versions = (await listNotes()).filter(note => note.task_id === taskId).map(note => note.version || 1)
   return Math.max(0, ...versions) + 1
 }
+export function noteIdForVersion(taskId: string, version: number) {
+  return `app-${taskId}${version === 1 ? '' : `-v${version}`}`
+}
 export async function createNote(payload: { title: string; content: string; task_id: string }, owner?: string, version?: number) {
-  if (owner && owner !== await readAccountId()) throw new Error('账号已切换，纪要未保存到其他账号')
+  const namespace = await prefix()
+  if (owner && namespace !== `vinote:${owner}:note:`) throw new Error('账号已切换，纪要未保存到其他账号')
   const number = version ?? await nextNoteVersion(payload.task_id)
   if (!Number.isSafeInteger(number) || number < 1) throw new Error('纪要版本号无效')
   const now = new Date().toISOString()
-  const note: Note = { ...payload, id: `app-${payload.task_id}${number === 1 ? '' : `-v${number}`}`, version: number,
+  const note: Note = { ...payload, id: noteIdForVersion(payload.task_id, number), version: number,
     source_type: 'meeting_recording', generation_client: 'mobile', status: 'done', created_at: now, updated_at: now }
-  await Storage.setItem(`${await prefix()}${note.id}`, JSON.stringify(note))
+  const key = `${namespace}${note.id}`
+  if (await Storage.getItem(key)) throw new Error(`版本 ${number} 的纪要已存在，请刷新录音库后重试`)
+  await Storage.setItem(key, JSON.stringify(note))
   return note
 }
 export async function shareNoteFile(note: Note) {
