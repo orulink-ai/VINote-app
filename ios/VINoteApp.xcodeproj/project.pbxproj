@@ -7,17 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-AA0123456789012345678901 = {isa = PBXBuildFile; fileRef = BB0123456789012345678901; };
-AA0123456789012345678900 = {isa = PBXBuildFile; fileRef = BB0123456789012345678900; };
 		0C80B921A6F3F58F76C31292 /* libPods-VINoteApp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-VINoteApp.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
+		A851DD4845387A68320C507D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
+		AA0123456789012345678900 /* MeetingAudio.m in Sources */ = {isa = PBXBuildFile; fileRef = BB0123456789012345678900 /* MeetingAudio.m */; };
+		AA0123456789012345678901 /* MeetingFiles.m in Sources */ = {isa = PBXBuildFile; fileRef = BB0123456789012345678901 /* MeetingFiles.m */; };
+		AA0123456789012345678902 /* MeetingProcessing.m in Sources */ = {isa = PBXBuildFile; fileRef = BB0123456789012345678902 /* MeetingProcessing.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-BB0123456789012345678901 = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = MeetingFiles.m; path = VINoteApp/MeetingFiles.m; sourceTree = "<group>"; };
-BB0123456789012345678900 = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = MeetingAudio.m; path = VINoteApp/MeetingAudio.m; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* VINoteApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VINoteApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = VINoteApp/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = VINoteApp/Info.plist; sourceTree = "<group>"; };
@@ -27,6 +27,9 @@ BB0123456789012345678900 = {isa = PBXFileReference; lastKnownFileType = sourceco
 		5DCACB8F33CDC322A6C60F78 /* libPods-VINoteApp.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-VINoteApp.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = VINoteApp/AppDelegate.swift; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = VINoteApp/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		BB0123456789012345678900 /* MeetingAudio.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = MeetingAudio.m; path = VINoteApp/MeetingAudio.m; sourceTree = "<group>"; };
+		BB0123456789012345678901 /* MeetingFiles.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = MeetingFiles.m; path = VINoteApp/MeetingFiles.m; sourceTree = "<group>"; };
+		BB0123456789012345678902 /* MeetingProcessing.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = MeetingProcessing.m; path = VINoteApp/MeetingProcessing.m; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -45,9 +48,10 @@ BB0123456789012345678900 = {isa = PBXFileReference; lastKnownFileType = sourceco
 		13B07FAE1A68108700A75B9A /* VINoteApp */ = {
 			isa = PBXGroup;
 			children = (
-				BB0123456789012345678900,
-BB0123456789012345678901,
-13B07FB51A68108700A75B9A /* Images.xcassets */,
+				BB0123456789012345678900 /* MeetingAudio.m */,
+				BB0123456789012345678901 /* MeetingFiles.m */,
+				BB0123456789012345678902 /* MeetingProcessing.m */,
+				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				761780EC2CA45674006654EE /* AppDelegate.swift */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
@@ -165,6 +169,7 @@ BB0123456789012345678901,
 			files = (
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
+				A851DD4845387A68320C507D /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -250,9 +255,10 @@ BB0123456789012345678901,
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA0123456789012345678900,
-AA0123456789012345678901,
-761780ED2CA45674006654EE /* AppDelegate.swift in Sources */,
+				AA0123456789012345678900 /* MeetingAudio.m in Sources */,
+				AA0123456789012345678901 /* MeetingFiles.m in Sources */,
+				AA0123456789012345678902 /* MeetingProcessing.m in Sources */,
+				761780ED2CA45674006654EE /* AppDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -378,6 +384,10 @@ AA0123456789012345678901,
 				);
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_CFLAGS = (
+					"$(inherited)",
+					"-DRCT_REMOVE_LEGACY_ARCH=1",
+				);
 				OTHER_CPLUSPLUSFLAGS = (
 					"$(OTHER_CFLAGS)",
 					"-DFOLLY_NO_CONFIG",
@@ -385,8 +395,13 @@ AA0123456789012345678901,
 					"-DFOLLY_USE_LIBCPP=1",
 					"-DFOLLY_CFG_NO_COROUTINES=1",
 					"-DFOLLY_HAVE_CLOCK_GETTIME=1",
+					"-DRCT_REMOVE_LEGACY_ARCH=1",
 				);
+				PODFILE_DIR = "$(SRCROOT)";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				USE_HERMES = true;
 			};
 			name = Debug;
 		};
@@ -443,6 +458,10 @@ AA0123456789012345678901,
 					"\"$(inherited)\"",
 				);
 				MTL_ENABLE_DEBUG_INFO = NO;
+				OTHER_CFLAGS = (
+					"$(inherited)",
+					"-DRCT_REMOVE_LEGACY_ARCH=1",
+				);
 				OTHER_CPLUSPLUSFLAGS = (
 					"$(OTHER_CFLAGS)",
 					"-DFOLLY_NO_CONFIG",
@@ -450,8 +469,12 @@ AA0123456789012345678901,
 					"-DFOLLY_USE_LIBCPP=1",
 					"-DFOLLY_CFG_NO_COROUTINES=1",
 					"-DFOLLY_HAVE_CLOCK_GETTIME=1",
+					"-DRCT_REMOVE_LEGACY_ARCH=1",
 				);
+				PODFILE_DIR = "$(SRCROOT)";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
+				USE_HERMES = true;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;

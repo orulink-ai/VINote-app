@@ -1,27 +1,51 @@
-import { createNote } from '../../lib/notes'
+import { createNote, getNote, nextNoteVersion, noteIdForVersion } from '../../lib/notes'
 import { transcribe, summarize } from '../../lib/meetingCloud'
 import { loadModels, loadSelection } from '../../lib/models'
 import { readAccountId } from '../../lib/storage'
-import { LocalRecording, saveRecording } from './recordingLibrary'
+import { LocalRecording, listRecordings, saveRecording } from './recordingLibrary'
 import { recordingTitle, summaryTopic } from './recordingTitle'
+import { NativeModules } from 'react-native'
+import { ApiError, TransportError } from '../../lib/errors'
 const active = new Set<string>()
-export async function generateRecording(record: LocalRecording, progress: (text: string) => void) {
+export async function generateRecording(record: LocalRecording, progress: (text: string) => void, resume = false) {
   const owner = await readAccountId()
   if (!owner) throw new Error('请重新登录')
   const key = `${owner}:${record.id}`
   if (active.has(key)) throw new Error('这条录音正在处理中')
   active.add(key)
   let current = record
+  let backgroundStarted = false
   const guard = async () => {
     if (await readAccountId() !== owner) throw new Error('账号已切换，处理已停止；已完成进度保留在原账号')
   }
   try {
-    const selection = await loadSelection()
+    if (record.generation?.version) {
+      let savedNote
+      try { savedNote = await getNote(noteIdForVersion(record.id, record.generation.version)) }
+      catch (error) { if (!(error instanceof ApiError && error.status === 404)) throw error }
+      if (savedNote) {
+        if (savedNote.task_id !== record.id) throw new Error('已保存纪要与录音不匹配，请检查本机数据')
+        await guard()
+        await saveRecording({ ...record, noteId: savedNote.id,
+          lastNoteVersion: Math.max(record.lastNoteVersion || 0, record.generation.version),
+          generation: undefined, error: undefined })
+        return savedNote.id
+      }
+    }
+    const selection = resume && record.generation
+      ? { asr_model: record.generation.asrModel, llm_model: record.generation.llmModel }
+      : await loadSelection()
     const models = await loadModels()
     for (const kind of ['asr', 'llm'] as const) {
       if (!models.some(m => m.id === selection[`${kind}_model`] && m.modelType === kind && m.runtimeStatus === 'available')) throw new Error('所选模型不可用，请重新选择云端模型')
     }
-    current = { ...record, taskId: undefined, error: undefined }
+    const version = record.generation?.version || Math.max((record.lastNoteVersion || 0) + 1, await nextNoteVersion(record.id))
+    current = { ...record, taskId: undefined, error: undefined, summaryCheckpoint: record.generation ? record.summaryCheckpoint : undefined,
+      generation: { status: 'pending', asrModel: selection.asr_model, llmModel: selection.llm_model,
+        startedAt: record.generation?.startedAt || new Date().toISOString(), version } }
+    await saveRecording(current)
+    try { backgroundStarted = !!await NativeModules.MeetingProcessing?.start() }
+    catch { progress('后台处理未能启动；已保存进度，请保持 App 在前台') }
     // ASR 模型变化时重新转写；总结失败可复用已落盘的完整转写。
     if (!current.transcript || current.asrModel !== selection.asr_model) {
       current = { ...current, transcript: undefined, summaryCheckpoint: undefined }
@@ -48,11 +72,31 @@ export async function generateRecording(record: LocalRecording, progress: (text:
     await guard()
     const topic = summaryTopic(content)
     if (current.titleSource === 'default' && topic) current = { ...current, title: recordingTitle(current.createdAt, topic), titleSource: 'ai' }
-    const note = await createNote({ title: current.title, content, task_id: record.id }, owner)
-    await saveRecording({ ...current, noteId: note.id, llmModel: selection.llm_model })
+    const note = await createNote({ title: current.title, content, task_id: record.id }, owner, version)
+    await saveRecording({ ...current, noteId: note.id, lastNoteVersion: Math.max(current.lastNoteVersion || 0, version),
+      llmModel: selection.llm_model, generation: undefined })
     return note.id
   } catch (error) {
-    if (await readAccountId() === owner) await saveRecording({ ...current, error: error instanceof Error ? error.message : '处理失败' })
+    const transient = error instanceof TransportError || (error instanceof ApiError && [502, 503, 504].includes(error.status))
+    if (await readAccountId() === owner) await saveRecording({ ...current,
+      generation: current.generation && { ...current.generation, status: transient ? 'pending' : 'paused' },
+      error: error instanceof Error ? error.message : '处理失败' })
     throw error
-  } finally { active.delete(key) }
+  } finally {
+    if (backgroundStarted) await NativeModules.MeetingProcessing.stop().catch(() => {})
+    active.delete(key)
+  }
+}
+
+let recovery: Promise<void> | undefined
+export function resumePendingRecordings(progress: (text: string) => void): Promise<void> {
+  if (recovery) return recovery
+  recovery = (async () => {
+    for (const record of await listRecordings()) {
+      if (record.generation?.status !== 'pending') continue
+      try { await generateRecording(record, progress, true) }
+      catch { /* generateRecording records the error and pauses this task for manual retry. */ }
+    }
+  })().finally(() => { recovery = undefined })
+  return recovery
 }

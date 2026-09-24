@@ -4,8 +4,9 @@ import { NativeModules } from 'react-native'
 import { recordingTitle } from './recordingTitle'
 import { readAccountId } from '../../lib/storage'
 import type { TranscriptionCheckpoint, SummaryCheckpoint } from '../../lib/meetingCloud'
+import { listNotes } from '../../lib/notes'
 
-export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; error?: string; transcriptionCheckpoint?: TranscriptionCheckpoint; summaryCheckpoint?: SummaryCheckpoint }
+export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; lastNoteVersion?: number; error?: string; transcriptionCheckpoint?: TranscriptionCheckpoint; summaryCheckpoint?: SummaryCheckpoint; generation?: { status: 'pending' | 'paused'; asrModel: string; llmModel: string; startedAt: string; version?: number } }
 export async function accountDirectory() {
   const account = await readAccountId()
   if (!account) throw new Error('请联网登录一次，以确认本机录音所属账号')
@@ -77,9 +78,15 @@ export async function deleteRecording(record: LocalRecording) {
   if (await FS.exists(`${metadata}.tmp`)) await FS.unlink(`${metadata}.tmp`)
 }
 
-export async function unlinkRecordingNote(noteId: string) {
+export async function unlinkRecordingNote(noteId: string, deletedVersion: number, taskId?: string | null) {
+  const notes = await listNotes()
   for (const record of await listRecordings()) {
-    if (record.noteId === noteId) await saveRecording({ ...record, noteId: undefined, error: undefined })
+    if (record.noteId === noteId || (taskId && record.id === taskId)) {
+      const latest = notes.filter(note => note.task_id === record.id)
+        .sort((a, b) => (b.version || 1) - (a.version || 1))[0]
+      await saveRecording({ ...record, noteId: latest?.id,
+        lastNoteVersion: Math.max(record.lastNoteVersion || 0, deletedVersion, latest?.version || 0), error: undefined })
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 import { RecordingsScreen } from './src/screens/RecordingsScreen'
 import React, { useEffect, useState } from 'react'
-import { ActivityIndicator, BackHandler, StatusBar, View } from 'react-native'
+import { ActivityIndicator, AppState, BackHandler, StatusBar, View } from 'react-native'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { LoginScreen } from './src/screens/LoginScreen'
 import { HomeScreen } from './src/screens/HomeScreen'
@@ -13,6 +13,7 @@ import { colors, styles } from './src/design-system/theme'
 import { TamaguiProvider } from 'tamagui'
 import { config } from './src/design-system/tamagui'
 import { ApiError } from './src/lib/api'
+import { resumePendingRecordings } from './src/features/recording/generateRecording'
 
 type Screen = 'home' | 'record' | 'recordings' | 'notes' | 'detail'
 
@@ -38,6 +39,13 @@ export default function App() {
       }
     }).catch(() => setAuthenticated(false))
   }, [])
+  useEffect(() => {
+    if (!authenticated) return
+    const resume = () => { void resumePendingRecordings(() => {}).catch(() => {}) }
+    resume()
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') resume() })
+    return () => subscription.remove()
+  }, [authenticated])
   if (authenticated === null) return <SafeAreaProvider><View style={styles.loading}><ActivityIndicator color={colors.primary} /></View></SafeAreaProvider>
   const content = !authenticated ? <LoginScreen onAuthenticated={() => setAuthenticated(true)} /> : screen === 'home' ? <HomeScreen onRecordings={() => setScreen('recordings')} onRecord={() => setScreen('record')} onNotes={() => setScreen('notes')} onSignOut={async () => { await signOut(); setScreen('home'); setNoteId(null); setAuthenticated(false) }} /> : screen === 'record' ? <RecordScreen onDone={() => setScreen('recordings')} onBack={() => setScreen('home')} /> : screen === 'recordings' ? <RecordingsScreen onBack={() => setScreen('home')} onOpenNote={id => { setDetailReturn('recordings'); setNoteId(id); setScreen('detail') }} /> : screen === 'notes' ? <NotesScreen onOpen={id => { setDetailReturn('notes'); setNoteId(id); setScreen('detail') }} onBack={() => setScreen('home')} /> : <NoteDetailScreen id={noteId!} backLabel={detailReturn === 'recordings' ? '录音库' : '纪要列表'} onBack={() => setScreen(detailReturn)} />
   return <TamaguiProvider config={config} defaultTheme="light"><SafeAreaProvider><SafeAreaView style={styles.screen}><StatusBar barStyle="dark-content" />{content}</SafeAreaView></SafeAreaProvider></TamaguiProvider>
