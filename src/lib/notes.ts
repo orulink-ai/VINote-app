@@ -2,6 +2,8 @@ import Storage from '@react-native-async-storage/async-storage'
 import { ApiError } from './errors'
 import { readAccountId } from './storage'
 import type { Note } from '../types/api'
+import FS from 'react-native-fs'
+import Share from 'react-native-share'
 async function prefix() {
   const account = await readAccountId()
   if (!account) throw new ApiError('请重新登录', 401)
@@ -26,10 +28,26 @@ export async function renameNote(id: string, title: string) {
   return note
 }
 export async function deleteNote(id: string) { await Storage.removeItem(`${await prefix()}${id}`) }
-export async function createNote(payload: { title: string; content: string; task_id: string }, owner?: string) {
+export async function nextNoteVersion(taskId: string) {
+  const versions = (await listNotes()).filter(note => note.task_id === taskId).map(note => note.version || 1)
+  return Math.max(0, ...versions) + 1
+}
+export async function createNote(payload: { title: string; content: string; task_id: string }, owner?: string, version?: number) {
   if (owner && owner !== await readAccountId()) throw new Error('账号已切换，纪要未保存到其他账号')
+  const number = version ?? await nextNoteVersion(payload.task_id)
+  if (!Number.isSafeInteger(number) || number < 1) throw new Error('纪要版本号无效')
   const now = new Date().toISOString()
-  const note: Note = { ...payload, id: `app-${payload.task_id}`, source_type: 'meeting_recording', generation_client: 'mobile', status: 'done', created_at: now, updated_at: now }
+  const note: Note = { ...payload, id: `app-${payload.task_id}${number === 1 ? '' : `-v${number}`}`, version: number,
+    source_type: 'meeting_recording', generation_client: 'mobile', status: 'done', created_at: now, updated_at: now }
   await Storage.setItem(`${await prefix()}${note.id}`, JSON.stringify(note))
   return note
+}
+export async function shareNoteFile(note: Note) {
+  const safeTitle = note.title.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim().slice(0, 60) || '会议纪要'
+  const directory = `${FS.CachesDirectoryPath}/vinote-share-${note.id}`
+  const path = `${directory}/${safeTitle}_v${note.version || 1}.md`
+  await FS.mkdir(directory)
+  await FS.writeFile(path, note.content, 'utf8')
+  // Share.open may resolve before the receiving app reads the file.
+  await Share.open({ url: `file://${path}`, type: 'text/markdown', title: `分享${safeTitle}（版本 ${note.version || 1}）`, failOnCancel: false, saveToFiles: true })
 }

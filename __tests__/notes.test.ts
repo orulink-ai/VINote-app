@@ -1,5 +1,7 @@
-import { createNote, getNote, renameNote, deleteNote, listNotes } from '../src/lib/notes'
+import { createNote, getNote, renameNote, deleteNote, listNotes, shareNoteFile } from '../src/lib/notes'
 import { readAccountId } from '../src/lib/storage'
+import FS from 'react-native-fs'
+import Share from 'react-native-share'
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn() }))
 test('local minutes are isolated by account and support rename and delete', async () => {
   jest.mocked(readAccountId).mockResolvedValue('alice')
@@ -12,4 +14,21 @@ test('local minutes are isolated by account and support rename and delete', asyn
   jest.mocked(readAccountId).mockResolvedValue('alice')
   await deleteNote(note.id)
   await expect(getNote(note.id)).rejects.toThrow('未找到')
+})
+test('each generation of the same audio keeps an independent numbered note', async () => {
+  jest.mocked(readAccountId).mockResolvedValue('alice')
+  const first = await createNote({ title: '同一段录音', content: '# 第一版', task_id: 'record-version' }, 'alice')
+  const second = await createNote({ title: '同一段录音', content: '# 第二版', task_id: 'record-version' }, 'alice')
+  expect(first).toMatchObject({ id: 'app-record-version', version: 1 })
+  expect(second).toMatchObject({ id: 'app-record-version-v2', version: 2 })
+  expect((await listNotes()).filter(note => note.task_id === 'record-version')).toHaveLength(2)
+  expect((await getNote(first.id)).content).toBe('# 第一版')
+})
+test('shares the selected version as a Markdown file kept available for the receiving app', async () => {
+  jest.mocked(readAccountId).mockResolvedValue('alice')
+  const note = await createNote({ title: '客户/会议', content: '# 第二版\n行动项', task_id: 'share-version' }, 'alice', 2)
+  await shareNoteFile(note)
+  expect(FS.writeFile).toHaveBeenCalledWith(expect.stringMatching(/客户_会议_v2\.md$/), note.content, 'utf8')
+  expect(Share.open).toHaveBeenCalledWith(expect.objectContaining({ url: expect.stringMatching(/客户_会议_v2\.md$/), type: 'text/markdown' }))
+  expect(FS.unlink).not.toHaveBeenCalled()
 })

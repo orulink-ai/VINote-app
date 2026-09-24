@@ -83,7 +83,7 @@ export function RecordScreen({ onDone, onBack }: { onDone: () => void; onBack: (
     <Card borderWidth={1} padding="$5" backgroundColor={colors.card} borderColor={colors.line} borderRadius="$3" alignItems="center" gap="$3"><Text fontSize={48} color={recording ? colors.danger : colors.ink}>{String(Math.floor(seconds / 60)).padStart(2, '0')}:{String(seconds % 60).padStart(2, '0')}</Text><Text color={colors.muted}>{busy ? phase : recording ? '● 正在录音' : pending ? '等待保存，可重试' : '待开始'}</Text></Card>
     <PrimaryButton title={busy ? phase : recording ? '结束录音' : pending ? '重试保存录音' : '开始录音'} loading={busy} disabled={busy || (mode === 'minutes' && !modelsReady && !recording && !pending)} onPress={recording ? stop : pending ? finish : start} />
     {mode === 'minutes' && <CloudModelPicker disabled={recording || busy || !!pending} onReady={setModelsReady} />}
-    <Text style={styles.subtitle}>录音支持切换其他 App 和锁屏。结束后先保存原音频；生成纪要时请保持前台。请勿强制关闭 App。</Text>
+    <Text style={styles.subtitle}>录音支持切换其他 App 和锁屏。生成纪要会逐段保存进度；切回 App 后可继续。iOS 后台处理时长受系统限制。</Text>
     <PrimaryButton secondary title="返回首页" disabled={recording || busy || !!pending} onPress={onBack} />
   </ScrollView>
 }
