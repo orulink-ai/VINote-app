@@ -1,40 +1,35 @@
-import { apiJson } from './api'
-import type { Note, TaskStatus } from '../types/api'
-
-export function listNotes() { return apiJson<Note[]>('/api/notes?scope=personal') }
-export function getNote(id: string) { return apiJson<Note>(`/api/notes/${id}`) }
-
-export async function uploadMeetingRecording(uri: string, title: string) {
-  const data = new FormData()
-  data.append('file', { uri, name: `vinote-${Date.now()}.m4a`, type: 'audio/mp4' } as unknown as Blob)
-  data.append('source_type', 'audio')
-  data.append('title', title)
-  data.append('style', 'meeting')
-  data.append('summary_mode', 'default')
-  data.append('workflow', 'meeting')
-  data.append('trace_source', 'local_file')
-  data.append('diarize', 'true')
-  data.append('meeting_mode', 'minutes')
-  data.append('meeting_type', 'audio')
-  data.append('output_language', 'zh-CN')
-  return apiJson<{ task_id: string }>('/api/generate_from_upload', { method: 'POST', body: data })
+import Storage from '@react-native-async-storage/async-storage'
+import { ApiError } from './errors'
+import { readAccountId } from './storage'
+import type { Note } from '../types/api'
+async function prefix() {
+  const account = await readAccountId()
+  if (!account) throw new ApiError('请重新登录', 401)
+  return `vinote:${account}:note:`
 }
-
-export async function waitForTask(taskId: string, onProgress?: (status: TaskStatus) => void) {
-  for (;;) {
-    const status = await apiJson<TaskStatus>(`/api/task/${taskId}`)
-    onProgress?.(status)
-    if (status.status === 'success') return status
-    if (status.status === 'failed' || status.status === 'not_found') {
-      throw new Error(status.message || '会议纪要生成失败')
-    }
-    await new Promise<void>(resolve => setTimeout(resolve, 2000))
-  }
+export async function listNotes(): Promise<Note[]> {
+  const start = await prefix()
+  const keys = (await Storage.getAllKeys()).filter(key => key.startsWith(start))
+  const rows = await Promise.all(keys.map(async key => [key, await Storage.getItem(key)] as const))
+  return rows.filter(([, value]) => !!value).map(([, value]) => JSON.parse(value!) as Note).sort((a, b) => b.created_at.localeCompare(a.created_at))
 }
-
-export function createNote(payload: { title: string; content: string; task_id: string }) {
-  return apiJson<Note>('/api/notes', {
-    method: 'POST',
-    body: JSON.stringify({ ...payload, source_type: 'meeting_recording', status: 'done' }),
-  })
+export async function getNote(id: string): Promise<Note> {
+  const value = await Storage.getItem(`${await prefix()}${id}`)
+  if (!value) throw new ApiError('本机未找到这份纪要', 404)
+  return JSON.parse(value)
+}
+export async function renameNote(id: string, title: string) {
+  const key = `${await prefix()}${id}`
+  if (!title.trim() || title.trim().length > 120) throw new Error('请输入 1–120 字的会议名称')
+  const note = { ...await getNote(id), title: title.trim(), updated_at: new Date().toISOString() }
+  await Storage.setItem(key, JSON.stringify(note))
+  return note
+}
+export async function deleteNote(id: string) { await Storage.removeItem(`${await prefix()}${id}`) }
+export async function createNote(payload: { title: string; content: string; task_id: string }, owner?: string) {
+  if (owner && owner !== await readAccountId()) throw new Error('账号已切换，纪要未保存到其他账号')
+  const now = new Date().toISOString()
+  const note: Note = { ...payload, id: `app-${payload.task_id}`, source_type: 'meeting_recording', generation_client: 'mobile', status: 'done', created_at: now, updated_at: now }
+  await Storage.setItem(`${await prefix()}${note.id}`, JSON.stringify(note))
+  return note
 }

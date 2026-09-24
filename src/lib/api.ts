@@ -1,27 +1,22 @@
 import { API_BASE_URL } from '../config/env'
-import { readToken } from './storage'
-
+import { Platform } from 'react-native'
+import { accessToken } from './supabase'
+import { decodeResponse, timedFetch } from './errors'
+export { ApiError } from './errors'
 export async function apiFetch(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
-  const token = await readToken()
-  if (token) headers.set('Authorization', `Bearer ${token}`)
-  if (typeof init.body === 'string' && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json')
+  headers.set('X-VINote-Client', 'mobile')
+  headers.set('X-VINote-Platform', Platform.OS)
+  headers.set('X-VILab-Client-Id', `vinote-app-${Platform.OS}`)
+  if (typeof init.body === 'string') headers.set('Content-Type', 'application/json')
+  headers.set('Authorization', `Bearer ${await accessToken()}`)
+  let response = await timedFetch(`${API_BASE_URL}${path}`, { ...init, headers }, 360000)
+  if (response.status === 401) {
+    headers.set('Authorization', `Bearer ${await accessToken(true)}`)
+    response = await timedFetch(`${API_BASE_URL}${path}`, { ...init, headers }, 360000)
   }
-  return fetch(`${API_BASE_URL}${path}`, { ...init, headers })
+  return response
 }
-
 export async function apiJson<T>(path: string, init: RequestInit = {}) {
-  const response = await apiFetch(path, init)
-  if (response.status === 204) return undefined as T
-  const text = await response.text()
-  let payload: unknown = text
-  try { payload = text ? JSON.parse(text) : null } catch { /* plain response */ }
-  if (!response.ok) {
-    const detail = typeof payload === 'object' && payload && 'detail' in payload
-      ? (payload as { detail?: unknown }).detail
-      : payload
-    throw new Error(typeof detail === 'string' ? detail : '请求失败，请稍后重试')
-  }
-  return payload as T
+  return decodeResponse<T>(await apiFetch(path, init))
 }

@@ -6,14 +6,17 @@ import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
+import com.facebook.react.modules.network.OkHttpClientProvider
 
 class MainApplication : Application(), ReactApplication {
 
   override val reactHost: ReactHost by lazy {
     getDefaultReactHost(
       context = applicationContext,
+      useDevSupport = BuildConfig.DEBUG && !BuildConfig.VINOTE_STANDALONE,
       packageList =
         PackageList(this).packages.apply {
+          add(MeetingAudioPackage())
           // Packages that cannot be autolinked yet can be added manually here, for example:
           // add(MyReactNativePackage())
         },
@@ -22,6 +25,11 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    OkHttpClientProvider.setOkHttpClientFactory {
+      OkHttpClientProvider.createClientBuilder()
+        .proxySelector(AccountProxySelector())
+        .build()
+    }
     loadReactNative(this)
   }
 }
