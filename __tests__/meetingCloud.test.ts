@@ -1,4 +1,4 @@
-import { NativeModules } from 'react-native'
+﻿import { NativeModules } from 'react-native'
 import FS from 'react-native-fs'
 import { apiJson } from '../src/lib/api'
 import { TransportError } from '../src/lib/errors'
@@ -87,7 +87,7 @@ test('a 28-minute meeting extracts timestamped facts before drafting and auditin
   const requests = jest.mocked(apiJson).mock.calls.map(([, init]) => JSON.parse(init!.body as string))
   expect(requests.filter(request => request.messages[0].content.includes('逐段提取')).length).toBeGreaterThan(1)
   expect(requests.some(request => request.messages[0].content.includes('核查纪要'))).toBe(true)
-  expect(requests.filter(request => request.messages[0].content.includes('逐段提取')).every(request => request.messages[0].content.includes('无意义数字'))).toBe(true)
+  expect(requests.filter(request => request.messages[0].content.includes('逐段提取')).every(request => request.messages[0].content.includes('不限于决策'))).toBe(true)
   expect(requests.every(request => request.model === 'llm')).toBe(true)
   expect(result).toContain('收音距离约三倍')
   expect(save).toHaveBeenCalledTimes(requests.length)
@@ -96,7 +96,7 @@ test('a 28-minute meeting extracts timestamped facts before drafting and auditin
 test('summary resumes saved fact extraction with the same model and prompt version', async () => {
   jest.mocked(apiJson).mockReset().mockResolvedValue({ choices: [{ message: { content: '# 新纪要' } }] } as never)
   const source = `[录音第 0 分钟起]\n${'会议内容。'.repeat(300)}`
-  const checkpoint = { version: 4 as const, model: 'llm', title: '会议', source, parts: { 'facts:0': '- [录音第 0 分钟起] 已提取事实' } }
+  const checkpoint = { version: 5 as const, model: 'llm', title: '会议', source, parts: { 'facts:0': '- [录音第 0 分钟起] 已提取事实' } }
   await summarize(source, '会议', 'llm', { checkpoint, guard: async () => {}, progress: jest.fn(), save: async () => {} })
   const requests = jest.mocked(apiJson).mock.calls.map(([, init]) => JSON.parse(init!.body as string))
   expect(requests.every(request => !request.messages[0].content.includes('逐段提取'))).toBe(true)

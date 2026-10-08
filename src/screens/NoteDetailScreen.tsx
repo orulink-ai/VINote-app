@@ -34,7 +34,7 @@ export function NoteDetailScreen({ id, onBack, backLabel = '纪要列表' }: { i
     } },
   ])
   return <View style={styles.screen}>
-    <View style={{ paddingHorizontal: 24, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+    <View style={{ paddingHorizontal: 24, paddingVertical: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
       <Pressable accessibilityRole="button" disabled={deleting} onPress={onBack} hitSlop={12}><Text style={styles.link}>‹ {backLabel}</Text></Pressable>
       {note && <Pressable accessibilityRole="button" accessibilityLabel="删除纪要" disabled={deleting} onPress={confirmDelete} hitSlop={12}><Text style={{ color: deleting ? colors.muted : colors.danger }}>{deleting ? '正在删除…' : '删除'}</Text></Pressable>}
     </View>

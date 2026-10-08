@@ -10,7 +10,7 @@ import { deleteRecording, exportRecording, listRecordings, LocalRecording, saveR
 import { listNotes } from '../lib/notes'
 import type { Note } from '../types/api'
 import { generateRecording } from '../features/recording/generateRecording'
-export function RecordingsScreen({ onBack, onOpenNote }: { onBack: () => void; onOpenNote: (id: string) => void }) {
+export function RecordingsScreen({ onBack, onOpenNote, initialGenerateId }: { onBack: () => void; onOpenNote: (id: string) => void; initialGenerateId?: string | null }) {
   const [renaming, setRenaming] = useState<LocalRecording | null>(null)
   const [items, setItems] = useState<LocalRecording[]>([])
   const [notes, setNotes] = useState<Note[]>([])
@@ -18,7 +18,7 @@ export function RecordingsScreen({ onBack, onOpenNote }: { onBack: () => void; o
   const [error, setError] = useState('')
   const [playing, setPlaying] = useState<string | null>(null)
   const [position, setPosition] = useState(0)
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(initialGenerateId || null)
   const [modelsReady, setModelsReady] = useState(false)
   const [working, setWorking] = useState<string | null>(null)
   const [phase, setPhase] = useState('')
@@ -62,7 +62,10 @@ export function RecordingsScreen({ onBack, onOpenNote }: { onBack: () => void; o
         if (locked.current) return
         locked.current = true; setImporting(true)
         void (async () => {
-          try { const record = await importRecording(); if (record) Alert.alert('音频已保存', '可在录音库播放、导出，或选择生成会议纪要。') }
+          try { const record = await importRecording(); if (record) Alert.alert('音频已保存', '原始音频已保存在本机。现在可以选择模型生成纪要，也可以稍后处理。', [
+            { text: '仅保存音频' },
+            { text: '生成会议纪要', onPress: () => { setModelsReady(false); setSelected(record.id) } },
+          ]) }
           catch (e) { Alert.alert('导入失败', e instanceof Error ? e.message : '请重新选择音频') }
           finally { locked.current = false; setImporting(false); await load() }
         })()
@@ -71,11 +74,11 @@ export function RecordingsScreen({ onBack, onOpenNote }: { onBack: () => void; o
       <Text fontSize={18} fontWeight="600" color={colors.ink}>{item.title}</Text>
       <Text color={colors.muted} fontSize={12}>{item.source === 'import' ? '导入于 ' : '录制于 '}{new Date(item.createdAt).toLocaleString('zh-CN')} · {item.duration ? Math.floor(item.duration / 60) + '分' + item.duration % 60 + '秒' : '时长待播放确认'}</Text>
       <Text color={item.error ? colors.danger : colors.muted}>{working === item.id ? phase || '正在处理…' : item.generation?.status === 'pending' ? item.error ? `暂时中断：${item.error}；回到 App 后继续` : '生成任务已保存，正在继续或等待 App 恢复' : item.error ? '处理失败：' + item.error : notes.some(note => note.task_id === item.id) ? '纪要已生成 · 原音频已保留' : '原音频已保存在本机'}</Text>
-      <XStack gap="$2" flexWrap="wrap">
-        <Button disabled={!!working || importing} onPress={() => setRenaming(item)}>修改名称</Button>
-        <Button disabled={!!working || importing} onPress={() => { setPhase('正在打开音频…'); void action(item, () => play(item)) }}>{playing === item.id ? '停止播放 · ' + position + 's' : '播放'}</Button>
-        <Button disabled={!!working || importing} onPress={() => { setPhase('正在导出…'); void action(item, () => exportRecording(item)) }}>导出原音频</Button>
-        <Button disabled={!!working || importing} color={colors.danger} onPress={() => Alert.alert('删除本机录音？', '原音频删除后无法恢复，已经保存的会议纪要不受影响。', [{ text: '取消', style: 'cancel' }, { text: '删除', style: 'destructive', onPress: () => { setPhase('正在删除…'); void action(item, async () => { if (playing === item.id) { await Sound.stopPlayer(); setPlaying(null) } await deleteRecording(item) }) } }])}>删除</Button>
+      <XStack gap="$2" flexWrap="wrap" alignItems="flex-start">
+        <Button flexBasis="47%" flexGrow={1} disabled={!!working || importing} onPress={() => setRenaming(item)}>修改名称</Button>
+        <Button flexBasis="47%" flexGrow={1} disabled={!!working || importing} onPress={() => { setPhase('正在打开音频…'); void action(item, () => play(item)) }}>{playing === item.id ? '停止播放 · ' + position + 's' : '播放'}</Button>
+        <Button flexBasis="47%" flexGrow={1} disabled={!!working || importing} onPress={() => { setPhase('正在导出…'); void action(item, () => exportRecording(item)) }}>导出原音频</Button>
+        <Button flexBasis="47%" flexGrow={1} disabled={!!working || importing} color={colors.danger} onPress={() => Alert.alert('删除本机录音？', '原音频删除后无法恢复，已经保存的会议纪要不受影响。', [{ text: '取消', style: 'cancel' }, { text: '删除', style: 'destructive', onPress: () => { setPhase('正在删除…'); void action(item, async () => { if (playing === item.id) { await Sound.stopPlayer(); setPlaying(null) } await deleteRecording(item) }) } }])}>删除</Button>
       </XStack>
       {notes.filter(note => note.task_id === item.id).sort((a, b) => (a.version || 1) - (b.version || 1)).map(note =>
         <PrimaryButton key={note.id} secondary title={`查看版本 ${note.version || 1}`} disabled={!!working || importing} onPress={() => onOpenNote(note.id)} />)}

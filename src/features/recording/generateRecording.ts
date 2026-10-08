@@ -71,8 +71,9 @@ export async function generateRecording(record: LocalRecording, progress: (text:
     })
     await guard()
     const topic = summaryTopic(content)
-    if (current.titleSource === 'default' && topic) current = { ...current, title: recordingTitle(current.createdAt, topic), titleSource: 'ai' }
-    const note = await createNote({ title: current.title, content, task_id: record.id }, owner, version)
+    const noteTitle = recordingTitle(current.createdAt, topic || (current.titleSource === 'manual' ? current.title : '会议交流'))
+    if (current.titleSource === 'default' && topic) current = { ...current, title: noteTitle, titleSource: 'ai' }
+    const note = await createNote({ title: noteTitle, content, task_id: record.id }, owner, version)
     await saveRecording({ ...current, noteId: note.id, lastNoteVersion: Math.max(current.lastNoteVersion || 0, version),
       llmModel: selection.llm_model, generation: undefined })
     return note.id
