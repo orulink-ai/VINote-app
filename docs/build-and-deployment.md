@@ -14,7 +14,7 @@ Node >=22.11；`npm ci` 使用锁文件安装。Android 使用 SDK/Build Tools 3
 
 测试版使用内网 VILab http://192.168.1.143:9876，正式版使用公网 VILab https://api.orulink.ai，与桌面端远端 dev 的服务地址保持一致。打包脚本自动选择对应配置；源码开发默认选择测试配置。测试包的 Android 应用 ID 为 com.vinoteapp.test，显示名为 VINote Test，可与正式版同时安装。账号认证仍使用同一 Supabase 项目，正式版不使用内网账号代理。
 
-npm 构建脚本会自动选择对应配置；直接运行 Gradle 前需执行 npm run config:test 或 npm run config:public，直接调用 Gradle 也在配置阶段校验。Babel 也执行校验，但不能仅依赖其缓存失效。
+npm 构建脚本会自动选择对应配置；直接运行 Gradle 前需执行 npm run config:test 或 npm run config:public，Gradle 配置阶段会拒绝与 Debug/Release 构建类型不符的通道。Babel 也执行校验，但不能仅依赖其缓存失效。
 
 | 命令 | 产物 | 用途 |
 | --- | --- | --- |

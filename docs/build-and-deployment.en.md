@@ -14,7 +14,7 @@ Run `npm start`, then `npm run android` in another terminal. Authorize USB debug
 
 The test package uses the LAN VILab at http://192.168.1.143:9876; the production package uses https://api.orulink.ai, matching the desktop dev branch. The build scripts select the profile automatically. Android test builds use com.vinoteapp.test and display VINote Test, so they can coexist with production. Both use the same Supabase account project; production has no LAN account proxy.
 
-The npm build commands select and validate their deployment profile. For direct Gradle builds first run `npm run config:test` or `npm run config:public`. Direct Gradle builds also validate during configuration. Babel validates too, but native checks do not rely on Babel cache invalidation.
+The npm build commands select and validate their deployment profile. For direct Gradle builds first run `npm run config:test` or `npm run config:public`. Gradle rejects channels that do not match the Debug/Release build type during configuration. Babel validates too, but native checks do not rely on Babel cache invalidation.
 
 | Command | Output | Purpose |
 | --- | --- | --- |

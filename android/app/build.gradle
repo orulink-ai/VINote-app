@@ -26,6 +26,13 @@ def requestedChannel = project.findProperty('vinoteChannel')
 if (requestedChannel && requestedChannel != (deployment.channel == 'lan' ? 'test' : 'public')) {
     throw new GradleException('Selected deployment does not match requested VINote channel')
 }
+def requestedBuildTypes = gradle.startParameter.taskNames.collect { it.toLowerCase() }
+if (requestedBuildTypes.any { it.contains('release') } && deployment.channel != 'public') {
+    throw new GradleException('Release builds require the public VINote deployment')
+}
+if (requestedBuildTypes.any { it.contains('debug') } && deployment.channel != 'lan') {
+    throw new GradleException('Debug builds require the test VINote deployment')
+}
 if (!(deployment.accountProxyHost ==~ /[a-zA-Z0-9.-]*/)) throw new GradleException("Invalid proxy host")
 
 /**
