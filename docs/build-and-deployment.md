@@ -12,7 +12,9 @@ Node >=22.11；`npm ci` 使用锁文件安装。Android 使用 SDK/Build Tools 3
 
 ## Android 包
 
-所有 npm 入口先校验 `config/deployment.json`；直接调用 Gradle 也在配置阶段校验。Babel 也执行校验，但不能仅依赖其缓存失效。
+测试版使用内网 VILab http://192.168.1.143:9876，正式版使用公网 VILab https://api.orulink.ai，与桌面端远端 dev 的服务地址保持一致。打包脚本自动选择对应配置；源码开发默认选择测试配置。测试包的 Android 应用 ID 为 com.vinoteapp.test，显示名为 VINote Test，可与正式版同时安装。账号认证仍使用同一 Supabase 项目，正式版不使用内网账号代理。
+
+npm 构建脚本会自动选择对应配置；直接运行 Gradle 前需执行 npm run config:test 或 npm run config:public，Gradle 配置阶段会拒绝与 Debug/Release 构建类型不符的通道。Babel 也执行校验，但不能仅依赖其缓存失效。
 
 | 命令 | 产物 | 用途 |
 | --- | --- | --- |
@@ -31,13 +33,13 @@ Node >=22.11；`npm ci` 使用锁文件安装。Android 使用 SDK/Build Tools 3
 
 通过本机安全环境或 CI 密钥注入，不写入 Git、命令日志或部署 JSON。同一应用后续升级必须使用兼容签名及递增 versionCode；调试签名与正式签名不能直接互相覆盖。不要为覆盖安装直接卸载含重要录音的应用，应先导出。Release 构建通过不等于商店审核通过。
 
-安装验收包：`adb -s <序列号> install -r android/app/build/outputs/apk/debug/app-debug.apk`，再运行 `adb -s <序列号> shell am start -n com.vinoteapp/.MainActivity`。独立包不依赖数据线或 Metro，但仍有部署网络依赖。
+安装验收包：`adb -s <序列号> install -r android/app/build/outputs/apk/debug/app-debug.apk`，再运行 `adb -s <序列号> shell am start -n com.vinoteapp.test/com.vinoteapp.MainActivity`。独立包不依赖数据线或 Metro，但仍有部署网络依赖。
 
 ## iOS
 
 在 Mac 上执行 `npm ci`、`bundle install`、`cd ios && bundle exec pod install`，再打开 `ios/VINoteApp.xcworkspace`。开发可在仓库根目录执行 `npm run ios` 并运行 Metro；真机需要在 Xcode 中选择开发团队和签名配置。
 
-归档前执行 `npm run config:check`，在 Xcode 选择真实设备/通用 iOS 设备、Release 和 Product → Archive，再通过 Organizer 按证书配置导出或分发。没有在 Windows 生成可安装 IPA 的脚本；尚无已验证的 iOS Release 产物。音频、导入、后台录音、局域网权限、ATS 和登录直连需在 Mac/iPhone 上验收，不能根据 Android 结果承诺可用。
+正式版归档前执行 `npm run config:public` 和 `npm run config:check`；测试版归档前执行 `npm run config:test` 和 `npm run config:check`，在 Xcode 选择真实设备/通用 iOS 设备、Release 和 Product → Archive，再通过 Organizer 按证书配置导出或分发。没有在 Windows 生成可安装 IPA 的脚本；尚无已验证的 iOS Release 产物。音频、导入、后台录音、局域网权限、ATS 和登录直连需在 Mac/iPhone 上验收，不能根据 Android 结果承诺可用。
 
 ## 部署配置与公网
 
@@ -48,7 +50,7 @@ Node >=22.11；`npm ci` 使用锁文件安装。Android 使用 SDK/Build Tools 3
 
 `lan` 允许 Android 明文网络以访问当前 HTTP 服务；`public` 禁用 Android 明文流量。公网校验要求 HTTPS DNS 域名，拒绝 IP 字面量、单标签主机及已知保留域名。**不执行 DNS 解析，不检测域名是否解析到私网，也不替代外网端到端验收。**
 
-公网发布需要运营方部署 HTTPS 入口或隧道并配置 DNS/证书、长请求超时和上传大小，之后再修改 JSON、重新构建、在蜂窝网络验收登录、模型列表、长音频、超时与重试。当前没有创建隧道，不要求最终用户自行设置代理；当前 LAN 包也不能声称“任意网络安装即用”。
+公网 VILab 已配置 HTTPS 域名。仍需由部署方确认 DNS/证书、长请求超时和上传大小，并在蜂窝网络验收登录、模型列表、长音频、超时与重试。测试包仅适用于可访问内网服务的网络。
 
 ## 检查与数据保护
 

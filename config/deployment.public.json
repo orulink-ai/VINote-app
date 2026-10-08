@@ -1,0 +1,7 @@
+{
+  "channel": "public",
+  "apiBaseUrl": "https://api.orulink.ai",
+  "authBaseUrl": "https://jzwidvczdjbkontidwpy.supabase.co",
+  "accountProxyHost": "",
+  "accountProxyPort": 7890
+}

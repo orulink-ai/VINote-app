@@ -12,7 +12,9 @@ Run `npm start`, then `npm run android` in another terminal. Authorize USB debug
 
 ## Android packages
 
-The npm entry points validate `config/deployment.json`. Direct Gradle builds also validate during configuration. Babel validates too, but native checks do not rely on Babel cache invalidation.
+The test package uses the LAN VILab at http://192.168.1.143:9876; the production package uses https://api.orulink.ai, matching the desktop dev branch. The build scripts select the profile automatically. Android test builds use com.vinoteapp.test and display VINote Test, so they can coexist with production. Both use the same Supabase account project; production has no LAN account proxy.
+
+The npm build commands select and validate their deployment profile. For direct Gradle builds first run `npm run config:test` or `npm run config:public`. Gradle rejects channels that do not match the Debug/Release build type during configuration. Babel validates too, but native checks do not rely on Babel cache invalidation.
 
 | Command | Output | Purpose |
 | --- | --- | --- |
@@ -31,13 +33,13 @@ Release builds require all four environment variables and fail without them; the
 
 Inject credentials through a secure local environment or CI secrets, never Git, command logs or deployment JSON. Updates require a compatible signing identity and an increasing versionCode. A production signature cannot overwrite a debug-signed installation. Export important recordings before any uninstall. A successful Release build does not imply store approval.
 
-Install the acceptance APK using `adb -s <serial> install -r android/app/build/outputs/apk/debug/app-debug.apk`, then launch `adb -s <serial> shell am start -n com.vinoteapp/.MainActivity`. Standalone packages do not need USB or Metro, but retain their deployment network dependencies.
+Install the acceptance APK using `adb -s <serial> install -r android/app/build/outputs/apk/debug/app-debug.apk`, then launch `adb -s <serial> shell am start -n com.vinoteapp.test/com.vinoteapp.MainActivity`. Standalone packages do not need USB or Metro, but retain their deployment network dependencies.
 
 ## iOS
 
 On macOS run `npm ci`, `bundle install`, and `cd ios && bundle exec pod install`. Open `ios/VINoteApp.xcworkspace`. Development uses `npm run ios` from the repository root plus Metro. Physical devices require an Xcode development team and signing configuration.
 
-Before archiving, run `npm run config:check`. In Xcode select a device/generic iOS destination and Release, then Product → Archive; export/distribute through Organizer using your provisioning configuration. No Windows script produces an installable IPA, and no iOS Release artifact has been verified. Audio conversion, import, background recording, local-network permission, ATS and direct authentication require Mac/iPhone validation. Android evidence does not verify iOS.
+Before archiving production, run `npm run config:public` and `npm run config:check`; for test archives use `npm run config:test` and `npm run config:check`. In Xcode select a device/generic iOS destination and Release, then Product → Archive; export/distribute through Organizer using your provisioning configuration. No Windows script produces an installable IPA, and no iOS Release artifact has been verified. Audio conversion, import, background recording, local-network permission, ATS and direct authentication require Mac/iPhone validation. Android evidence does not verify iOS.
 
 ## Deployment configuration and public access
 
@@ -48,7 +50,7 @@ Before archiving, run `npm run config:check`. In Xcode select a device/generic i
 
 `lan` permits Android cleartext networking for the current HTTP service; `public` disables it. Public validation requires HTTPS DNS names and rejects IP literals, single-label hosts and known reserved suffixes. **It does not resolve DNS, detect private DNS answers or replace external end-to-end tests.**
 
-Public distribution requires the operator to provision HTTPS ingress/a tunnel, DNS, certificates, upload limits and long-request timeouts. Then change JSON, rebuild and validate login, model listing, long audio, timeouts and retries over cellular data. No tunnel is currently deployed. Users are not expected to configure proxies themselves, but the current LAN build cannot claim to work on every network.
+The public VILab HTTPS origin is configured. The operator must still verify DNS, certificates, upload limits and long-request timeouts, then validate login, model listing, long audio, timeouts and retries over cellular data. Users do not configure proxies; test packages require LAN access.
 
 ## Checks and data protection
 

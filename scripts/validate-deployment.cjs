@@ -19,6 +19,7 @@ function validateDeployment(config) {
 }
 module.exports = { validateDeployment }
 if (require.main === module) {
-  const config = validateDeployment(require('../config/deployment.json'))
-  console.log(`部署配置检查通过：${config.channel}（不代表网络连通性已验证）`)
+  validateDeployment(require('../config/deployment.test.json'))
+  validateDeployment(require('../config/deployment.public.json'))
+  console.log("测试版和正式版配置检查通过（不代表网络连通性已验证）")
 }
