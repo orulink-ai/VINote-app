@@ -17,9 +17,9 @@ A native React Native Community CLI app using Tamagui 2.7.7, without Expo. Both 
 
 ## Network and platform limits
 
-`config/deployment.json` is the build-time deployment configuration; users have no configuration form. The current `lan` channel uses `http://192.168.1.143:9876` for VILab and HTTPS for Supabase. Android routes only account-domain requests through the CONNECT endpoint `192.168.1.101:7890`, which must remain reachable. iOS does not implement that proxy. A standalone APK works without USB/Metro, but cloud features still require access to these endpoints.
+Test packages use VILab `http://192.168.1.143:9876`; production packages use `https://api.orulink.ai`. Both use the same HTTPS Supabase account project. Android test builds route account requests through `192.168.1.101:7890`; production has no LAN account proxy. Build commands select the deployment profile, so users need no configuration form.
 
-**No public tunnel has been deployed.** A public build requires the operator to provision stable HTTPS domain endpoints for both services and remove the account proxy. Static configuration validation does not prove DNS, TLS, upstream authentication or large-upload connectivity.
+The public VILab HTTPS origin is configured. Static configuration validation does not prove DNS, TLS, upstream authentication or large-upload connectivity. Test packages still require LAN access.
 
 Android uses a microphone foreground service for recording and a dataSync foreground service with a notification while processing; system quotas and battery policies still apply. iOS declares background audio for recording and requests limited background execution time for processing. A long meeting can pause when iOS suspends the app; reopening it resumes from checkpoints. Calls, microphone contention, process termination, and low disk space can interrupt recording. An interrupted file is not guaranteed to be decodable. Speaker diarization is deferred and unavailable.
 

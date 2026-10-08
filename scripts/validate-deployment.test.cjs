@@ -12,3 +12,11 @@ test('validate origins, authentication TLS, proxies and channels', () => {
   assert.doesNotThrow(() => validateDeployment({ ...base, channel: 'lan', apiBaseUrl: 'http://192.168.1.143:9876' }))
   for (const patch of [{ apiBaseUrl: 'http://api.vinote.app' }, { authBaseUrl: 'http://account.supabase.co' }, { apiBaseUrl: 'https://user:pass@api.vinote.app' }, { apiBaseUrl: 'https://api.vinote.app/v1' }, { accountProxyHost: '192.168.1.101' }, { accountProxyPort: 0 }, { channel: 'unknown' }]) assert.throws(() => validateDeployment({ ...base, ...patch }))
 })
+
+test('build channels use the desktop dev VILab origins', () => {
+  const testConfig = validateDeployment(require('../config/deployment.test.json'))
+  const publicConfig = validateDeployment(require('../config/deployment.public.json'))
+  assert.equal(testConfig.apiBaseUrl, 'http://192.168.1.143:9876')
+  assert.equal(publicConfig.apiBaseUrl, 'https://api.orulink.ai')
+  assert.equal(publicConfig.accountProxyHost, '')
+})
