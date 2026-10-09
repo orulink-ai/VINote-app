@@ -29,6 +29,7 @@ build/
 .gradle
 .gradle-user-home/
 .gradle-user-home-jbr/
+android/.gradle-user/
 gradle-build.*.log
 local.properties
 *.iml

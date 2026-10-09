@@ -1,7 +1,5 @@
 import React from 'react'
 import Renderer, { act } from 'react-test-renderer'
-import { TamaguiProvider } from 'tamagui'
-import { config } from '../src/design-system/tamagui'
 import { RecordScreen } from '../src/screens/RecordScreen'
 import { PrimaryButton } from '../src/components/PrimaryButton'
 import { listenRecording } from '../src/features/recording/recordingService'
@@ -25,8 +23,8 @@ test('a negative native recording position never reaches the timer display', asy
   jest.mocked(listenRecording).mockImplementation(callback => { nativeTick = callback; return () => {} })
   let view: Renderer.ReactTestRenderer | undefined
   try {
-    await act(async () => { view = Renderer.create(<TamaguiProvider config={config} defaultTheme="light"><RecordScreen onDone={jest.fn()} onBack={jest.fn()} /></TamaguiProvider>) })
-    const timerText = () => view!.root.findAll(node => node.props.fontSize === 48)[0].props.children.join('')
+    await act(async () => { view = Renderer.create(<><RecordScreen onDone={jest.fn()} onBack={jest.fn()} /></>) })
+    const timerText = () => view!.root.findAll(node => Array.isArray(node.props.children) && /^\d{2}:\d{2}$/.test(node.props.children.join('')))[0].props.children.join('')
     await act(async () => { await view!.root.findAllByType(PrimaryButton)[0].props.onPress() })
     await act(async () => { nativeTick?.(-235227000) })
     expect(timerText()).toBe('00:00')

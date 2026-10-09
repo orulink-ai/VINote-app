@@ -1,8 +1,6 @@
-﻿import React from 'react'
+import React from 'react'
 import Renderer, { act } from 'react-test-renderer'
 import { Alert } from 'react-native'
-import { TamaguiProvider } from 'tamagui'
-import { config } from '../src/design-system/tamagui'
 import { RecordScreen } from '../src/screens/RecordScreen'
 import { PrimaryButton } from '../src/components/PrimaryButton'
 import * as recording from '../src/features/recording/recordingService'
@@ -13,7 +11,7 @@ test('recording saves original before offering post-recording choices', async ()
   const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {})
   const done = jest.fn()
   let view!: Renderer.ReactTestRenderer
-  await act(async () => { view = Renderer.create(<TamaguiProvider config={config} defaultTheme="light"><RecordScreen onDone={done} onBack={jest.fn()} /></TamaguiProvider>) })
+  await act(async () => { view = Renderer.create(<><RecordScreen onDone={done} onBack={jest.fn()} /></>) })
   await act(async () => { await view.root.findAllByType(PrimaryButton)[0].props.onPress() })
   await act(async () => { view.root.findAllByType(PrimaryButton)[0].props.onPress() })
   expect(recording.stopRecording).not.toHaveBeenCalled()

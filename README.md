@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [运行、打包与部署](docs/build-and-deployment.md) · [Android 验收记录](docs/android-device-check-20260923.md)
 
-React Native Community CLI 原生应用，使用 Tamagui 2.7.7；不使用 Expo。Android 和 iOS 均有原生录音、导入与音频切分实现；具体后台行为需要按系统版本真机验收。
+React Native Community CLI 原生应用，使用统一的 React Native 原生组件与中性色主题；不使用 Expo。Android 和 iOS 均有原生录音、导入与音频切分实现；具体后台行为需要按系统版本真机验收。
 
 ## 当前架构与功能
 

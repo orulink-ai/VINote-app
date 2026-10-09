@@ -1,5 +1,3 @@
-import { TamaguiProvider } from 'tamagui'
-import { config } from '../src/design-system/tamagui'
 import React from 'react'
 import { Alert } from 'react-native'
 import Renderer, { act } from 'react-test-renderer'
@@ -17,7 +15,7 @@ test('email reset validates passwords, preserves failed verification, and return
   jest.spyOn(Alert, 'alert').mockImplementation(() => {})
   const back = jest.fn()
   let view!: Renderer.ReactTestRenderer
-  await act(async () => { view = Renderer.create(<TamaguiProvider config={config} defaultTheme="light"><PasswordResetScreen onBack={back} /></TamaguiProvider>) })
+  await act(async () => { view = Renderer.create(<><PasswordResetScreen onBack={back} /></>) })
   const fill = async (label: string, value: string) => {
     await act(async () => view.root.findAllByType(Field).find(field => field.props.label === label)!.props.onChangeText(value))
   }
