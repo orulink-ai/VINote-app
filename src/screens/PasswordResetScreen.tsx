@@ -45,8 +45,9 @@ export function PasswordResetScreen({ onBack }: { onBack: () => void }) {
   }
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, styles.loginContent]}>
+      <Text style={styles.eyebrow}>账号安全</Text>
       <Text style={styles.title}>重置密码</Text>
-      <Text style={styles.subtitle}>通过注册邮箱验证身份，设置新的 VINote 账号密码。</Text>
+      <Text style={[styles.subtitle, { marginBottom: 18 }]}>通过注册邮箱验证身份，设置新的 VINote 账号密码。</Text>
       <Field label="邮箱" value={email} onChangeText={setEmail} editable={!sent && !loading} keyboardType="email-address" autoCorrect={false} placeholder="you@example.com" />
       {sent && <>
         <Field label="邮箱验证码" value={code} onChangeText={setCode} editable={!loading} keyboardType="number-pad" maxLength={10} />
@@ -55,7 +56,7 @@ export function PasswordResetScreen({ onBack }: { onBack: () => void }) {
         <PrimaryButton title="确认重置密码" loading={loading} disabled={loading} onPress={submit} />
       </>}
       <PrimaryButton title={sent ? (cooldown ? cooldown + ' 秒后可重新发送' : '重新发送验证码') : '发送重置验证码'} loading={loading && !sent} disabled={loading || cooldown > 0} onPress={send} />
-      <PrimaryButton title="返回登录" disabled={loading} onPress={onBack} />
+      <PrimaryButton secondary title="返回登录" disabled={loading} onPress={onBack} />
     </ScrollView>
   </KeyboardAvoidingView>
 }

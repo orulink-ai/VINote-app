@@ -9,7 +9,7 @@ import { deleteRecording, exportRecording, listRecordings, LocalRecording, saveR
 import { listNotes } from '../lib/notes'
 import type { Note } from '../types/api'
 import { generateRecording } from '../features/recording/generateRecording'
-export function RecordingsScreen({ onBack, onOpenNote, initialGenerateId }: { onBack: () => void; onOpenNote: (id: string) => void; initialGenerateId?: string | null }) {
+export function RecordingsScreen({ onBack, onOpenNote, initialGenerateId, initialImport = false }: { onBack: () => void; onOpenNote: (id: string) => void; initialGenerateId?: string | null; initialImport?: boolean }) {
   const [renaming, setRenaming] = useState<LocalRecording | null>(null)
   const [items, setItems] = useState<LocalRecording[]>([])
   const [notes, setNotes] = useState<Note[]>([])
@@ -23,6 +23,7 @@ export function RecordingsScreen({ onBack, onOpenNote, initialGenerateId }: { on
   const [phase, setPhase] = useState('')
   const [importing, setImporting] = useState(false)
   const locked = useRef(false)
+  const importTriggered = useRef(false)
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try { const [recordings, savedNotes] = await Promise.all([listRecordings(), listNotes()]); setItems(recordings); setNotes(savedNotes) }
@@ -46,6 +47,23 @@ export function RecordingsScreen({ onBack, onOpenNote, initialGenerateId }: { on
     try { await operation() } catch (e) { Alert.alert('操作未完成', e instanceof Error ? e.message : '请重试') }
     finally { locked.current = false; setWorking(null); await load() }
   }
+  const startImport = useCallback(() => {
+    if (locked.current) return
+    locked.current = true; setImporting(true)
+    void (async () => {
+      try {
+        const record = await importRecording()
+        if (record) Alert.alert('音频已保存', '原始音频已保存在本机。现在可以选择模型生成纪要，也可以稍后处理。', [
+          { text: '仅保存音频' },
+          { text: '生成会议纪要', onPress: () => { setModelsReady(false); setSelected(record.id) } },
+        ])
+      } catch (e) { Alert.alert('导入失败', e instanceof Error ? e.message : '请重新选择音频') }
+      finally { locked.current = false; setImporting(false); await load() }
+    })()
+  }, [load])
+  useEffect(() => {
+    if (initialImport && !importTriggered.current) { importTriggered.current = true; startImport() }
+  }, [initialImport, startImport])
   const play = async (record: LocalRecording) => {
     await Sound.stopPlayer(); Sound.removePlayBackListener(); Sound.removePlaybackEndListener()
     if (playing === record.id) { setPlaying(null); return }
@@ -56,40 +74,29 @@ export function RecordingsScreen({ onBack, onOpenNote, initialGenerateId }: { on
     Sound.addPlaybackEndListener(() => { setPlaying(null); void Sound.stopPlayer().catch(() => {}) })
   }
   return <View style={styles.screen}>
-    <View style={styles.content}><Pressable accessibilityRole="button" disabled={!!working || importing} onPress={onBack}><Text style={styles.link}>‹ 返回首页</Text></Pressable><Text style={styles.title}>录音库</Text><Text style={styles.subtitle}>本机原始音频 · 可播放、导出、生成纪要</Text>
-      <PrimaryButton secondary title={importing ? '正在导入音频…' : '导入音频'} disabled={!!working || importing} onPress={() => {
-        if (locked.current) return
-        locked.current = true; setImporting(true)
-        void (async () => {
-          try { const record = await importRecording(); if (record) Alert.alert('音频已保存', '原始音频已保存在本机。现在可以选择模型生成纪要，也可以稍后处理。', [
-            { text: '仅保存音频' },
-            { text: '生成会议纪要', onPress: () => { setModelsReady(false); setSelected(record.id) } },
-          ]) }
-          catch (e) { Alert.alert('导入失败', e instanceof Error ? e.message : '请重新选择音频') }
-          finally { locked.current = false; setImporting(false); await load() }
-        })()
-      }} />{error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}</View>
-    <FlatList data={items} refreshing={loading} onRefresh={load} keyExtractor={item => item.id} contentContainerStyle={{ padding: 20, gap: 12 }} ListEmptyComponent={<Text style={styles.subtitle}>{loading ? '正在加载…' : '还没有录音。新建录音后会自动保存在这里。'}</Text>} renderItem={({ item }) => <View style={styles.card}>
+    <View style={styles.content}><Pressable accessibilityRole="button" disabled={!!working || importing} onPress={onBack} style={{ paddingVertical: 6 }}><Text style={styles.link}>‹ 首页</Text></Pressable>
+      <View style={{ gap: 7, paddingTop: 10 }}><Text style={styles.title}>录音库</Text><Text style={styles.subtitle}>原始音频保存在本机</Text></View>
+      <PrimaryButton secondary title={importing ? '正在导入音频…' : '导入音频'} disabled={!!working || importing} onPress={startImport} />{error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}</View>
+    <FlatList data={items} refreshing={loading} onRefresh={load} keyExtractor={item => item.id} contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: 28, gap: 12 }} ListEmptyComponent={<View style={[styles.card, { paddingVertical: 32 }]}><Text style={styles.noteTitle}>{loading ? '正在加载…' : '还没有录音'}</Text><Text style={styles.subtitle}>录制或导入的音频会显示在这里。</Text></View>} renderItem={({ item }) => <View style={styles.card}>
+      <Text style={styles.eyebrow}>{item.source === 'import' ? '导入音频' : '会议录音'}</Text>
       <Text style={styles.noteTitle}>{item.title}</Text>
-      <Text style={{ color: colors.muted, fontSize: 12 }}>{item.source === 'import' ? '导入于 ' : '录制于 '}{new Date(item.createdAt).toLocaleString('zh-CN')} · {item.duration ? Math.floor(item.duration / 60) + '分' + item.duration % 60 + '秒' : '时长待播放确认'}</Text>
-      <Text style={{ color: item.error ? colors.danger : colors.muted }}>{working === item.id ? phase || '正在处理…' : item.generation?.status === 'pending' ? item.error ? `暂时中断：${item.error}；回到 App 后继续` : '生成任务已保存，正在继续或等待 App 恢复' : item.error ? '处理失败：' + item.error : notes.some(note => note.task_id === item.id) ? '纪要已生成 · 原音频已保留' : '原音频已保存在本机'}</Text>
-      <View style={{ gap: 8 }}>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <PrimaryButton secondary style={{ flex: 1 }} title="修改名称" disabled={!!working || importing} onPress={() => setRenaming(item)} />
-          <PrimaryButton secondary style={{ flex: 1 }} title={playing === item.id ? '停止播放 · ' + position + 's' : '播放'} disabled={!!working || importing} onPress={() => { setPhase('正在打开音频…'); void action(item, () => play(item)) }} />
-        </View>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <PrimaryButton secondary style={{ flex: 1 }} title="导出原音频" disabled={!!working || importing} onPress={() => { setPhase('正在导出…'); void action(item, () => exportRecording(item)) }} />
-          <Pressable accessibilityRole="button" style={[styles.secondaryButton, { flex: 1 }]} disabled={!!working || importing} onPress={() => Alert.alert('删除本机录音？', '原音频删除后无法恢复，已经保存的会议纪要不受影响。', [{ text: '取消', style: 'cancel' }, { text: '删除', style: 'destructive', onPress: () => { setPhase('正在删除…'); void action(item, async () => { if (playing === item.id) { await Sound.stopPlayer(); setPlaying(null) } await deleteRecording(item) }) } }])}><Text style={[styles.secondaryButtonText, { color: colors.danger }]}>删除</Text></Pressable>
-        </View>
-      </View>
+      <Text style={{ color: colors.muted, fontSize: 12 }}>{new Date(item.createdAt).toLocaleString('zh-CN')} · {item.duration ? Math.floor(item.duration / 60) + '分' + item.duration % 60 + '秒' : '时长待播放确认'}</Text>
+      <View style={{ borderRadius: 12, backgroundColor: item.error ? colors.dangerSoft : colors.primarySoft, paddingHorizontal: 12, paddingVertical: 10 }}><Text style={{ color: item.error ? colors.danger : colors.muted, fontSize: 13, lineHeight: 19 }}>{working === item.id ? phase || '正在处理…' : item.generation?.status === 'pending' ? item.error ? `暂时中断：${item.error}；回到 App 后继续` : '生成任务已保存，正在继续或等待 App 恢复' : item.error ? '处理失败：' + item.error : notes.some(note => note.task_id === item.id) ? '纪要已生成 · 原音频已保留' : '原音频已保存在本机'}</Text></View>
       {notes.filter(note => note.task_id === item.id).sort((a, b) => (a.version || 1) - (b.version || 1)).map(note =>
         <PrimaryButton key={note.id} secondary title={`查看版本 ${note.version || 1}`} disabled={!!working || importing} onPress={() => onOpenNote(note.id)} />)}
       {selected === item.id ? <View style={{ gap: 12 }}>
         <CloudModelPicker disabled={!!working || importing} onReady={setModelsReady} />
         <PrimaryButton title={working === item.id ? phase : item.generation?.status === 'paused' ? `重试生成版本 ${item.generation.version || 1}` : `生成版本 ${Math.max(item.lastNoteVersion || 0, ...notes.filter(note => note.task_id === item.id).map(note => note.version || 1)) + 1}`} loading={working === item.id} disabled={!!working || importing || !modelsReady} onPress={() => { void action(item, async () => { await Sound.stopPlayer(); setPlaying(null); await generateRecording(item, setPhase); setSelected(null) }) }} />
         <PrimaryButton secondary title="取消" disabled={!!working || importing} onPress={() => setSelected(null)} />
-      </View> : <PrimaryButton secondary title={item.generation?.status === 'paused' ? '重试生成纪要' : notes.some(note => note.task_id === item.id) ? '再生成一版' : '生成会议纪要'} disabled={!!working || importing || (item.generation?.status === 'pending' && !item.error)} onPress={() => { setModelsReady(false); setSelected(item.id) }} />}
+      </View> : <PrimaryButton title={item.generation?.status === 'paused' ? '重试生成纪要' : notes.some(note => note.task_id === item.id) ? '再生成一版' : '生成会议纪要'} disabled={!!working || importing || (item.generation?.status === 'pending' && !item.error)} onPress={() => { setModelsReady(false); setSelected(item.id) }} />}
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <PrimaryButton secondary style={{ flex: 1 }} title={playing === item.id ? '停止 · ' + position + 's' : '播放原声'} disabled={!!working || importing} onPress={() => { setPhase('正在打开音频…'); void action(item, () => play(item)) }} />
+        <PrimaryButton secondary style={{ flex: 1 }} title="导出原音频" disabled={!!working || importing} onPress={() => { setPhase('正在导出…'); void action(item, () => exportRecording(item)) }} />
+      </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 2 }}>
+        <Pressable accessibilityRole="button" disabled={!!working || importing} hitSlop={10} onPress={() => setRenaming(item)}><Text style={styles.link}>修改名称</Text></Pressable>
+        <Pressable accessibilityRole="button" disabled={!!working || importing} hitSlop={10} onPress={() => Alert.alert('删除本机录音？', '原音频删除后无法恢复，已经保存的会议纪要不受影响。', [{ text: '取消', style: 'cancel' }, { text: '删除', style: 'destructive', onPress: () => { setPhase('正在删除…'); void action(item, async () => { if (playing === item.id) { await Sound.stopPlayer(); setPlaying(null) } await deleteRecording(item) }) } }])}><Text style={[styles.link, { color: colors.danger }]}>删除录音</Text></Pressable>
+      </View>
     </View>} />
     {renaming && <RenameDialog title={renaming.title} onClose={() => setRenaming(null)} onSave={async title => { await saveRecording({ ...renaming, title, titleSource: 'manual' }); await load() }} />}
   </View>

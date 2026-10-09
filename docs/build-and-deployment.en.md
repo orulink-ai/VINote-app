@@ -52,6 +52,8 @@ Before archiving production, run `npm run config:public` and `npm run config:che
 - `authBaseUrl`: HTTPS account Origin preserving `/auth/v1`, the Supabase project and auth semantics. The public publishable key lives in `src/config/env.ts`; never use a service_role key.
 - `accountProxyHost` / `accountProxyPort`: Android account CONNECT endpoint. Port must be an integer from 1 to 65535. Public builds require an empty host, while the port remains a valid integer.
 
+Public Android Supabase account requests honor the system `ProxySelector`; business APIs and Metro retain direct connections. Networks that reset Supabase TLS connections require a reachable network or a system proxy. This release does not provide a public authentication gateway. For a standalone public Debug acceptance APK, select the public configuration and run `gradlew assembleDebug -PvinoteStandalone=true -PvinoteChannel=public`; it embeds JavaScript and uses the separate debug-signed `com.vinoteapp.dev` identity.
+
 `lan` permits Android cleartext networking for the current HTTP service; `public` disables it. Public validation requires HTTPS DNS names and rejects IP literals, single-label hosts and known reserved suffixes. **It does not resolve DNS, detect private DNS answers or replace external end-to-end tests.**
 
 The public VILab HTTPS origin is configured. The operator must still verify DNS, certificates, upload limits and long-request timeouts, then validate login, model listing, long audio, timeouts and retries over cellular data. Users do not configure proxies; test packages require LAN access.

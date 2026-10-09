@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react'
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text } from 'react-native'
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Field } from '../components/Field'
 import { PrimaryButton } from '../components/PrimaryButton'
 import { getAuthConfig, requestRegistration, signIn, signUp, verifyRegistration } from '../lib/auth'
-import { styles } from '../design-system/theme'
+import { colors, styles } from '../design-system/theme'
 import { PasswordResetScreen } from './PasswordResetScreen'
+import { BrandMark } from '../components/BrandMark'
 
 export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [email, setEmail] = useState('')
@@ -59,17 +60,32 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
   }
   if (reset) return <PasswordResetScreen onBack={() => setReset(false)} />
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, styles.loginContent]}>
-      <Text style={styles.title}>{register ? '注册 VINote' : 'VINote'}</Text>
-      <Text style={styles.subtitle}>手机与桌面端共用一个 VINote 账号，可直接在手机注册。</Text>
-      <Field label="邮箱" value={email} onChangeText={setEmail} editable={!sent && !loading} keyboardType="email-address" autoCorrect={false} placeholder="you@example.com" />
-      <Field label="密码" value={password} onChangeText={setPassword} editable={!sent && !loading} secureTextEntry placeholder="至少 6 位" />
-      {register && <Field label="确认密码" value={confirmation} onChangeText={setConfirmation} editable={!sent && !loading} secureTextEntry placeholder="再次输入密码" />}
-      {sent && <><Text style={styles.subtitle}>请查收邮箱验证码。邮箱和密码已锁定；需要修改时请返回登录后重新注册。</Text><Field label="邮箱验证码" value={code} onChangeText={setCode} editable={!loading} keyboardType="number-pad" maxLength={10} /></>}
-      <PrimaryButton title={register ? (sent ? '验证并登录' : '注册账号') : '登录'} loading={loading} disabled={loading} onPress={() => submit()} />
-      {sent && <PrimaryButton title={cooldown ? cooldown + ' 秒后可重新发送' : '重新发送验证码'} disabled={loading || cooldown > 0} onPress={() => submit(true)} />}
-      <PrimaryButton title={register ? '已有账号，返回登录' : '没有账号？注册'} disabled={loading} onPress={switchMode} />
-      {!register && <PrimaryButton title="忘记密码？" disabled={loading} onPress={() => { setPassword(''); setReset(true) }} />}
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, local.content]}>
+      <View style={local.brand}><BrandMark size={38} /><Text style={local.brandName}>VINote</Text></View>
+      <View style={local.form}>
+        <Text style={styles.title}>{register ? sent ? '验证邮箱' : '注册账号' : '登录'}</Text>
+        {sent && <Text style={styles.subtitle}>输入发送到 {email} 的验证码。</Text>}
+        <View style={local.fields}>
+          <Field label="邮箱" value={email} onChangeText={setEmail} editable={!sent && !loading} keyboardType="email-address" autoComplete="email" autoCorrect={false} placeholder="you@example.com" />
+          <Field label="密码" value={password} onChangeText={setPassword} editable={!sent && !loading} secureTextEntry autoComplete={register ? 'new-password' : 'current-password'} placeholder="至少 6 位" />
+          {register && <Field label="确认密码" value={confirmation} onChangeText={setConfirmation} editable={!sent && !loading} secureTextEntry autoComplete="new-password" placeholder="再次输入密码" />}
+          {sent && <Field label="邮箱验证码" value={code} onChangeText={setCode} editable={!loading} keyboardType="number-pad" maxLength={10} />}
+        </View>
+        {!register && <PrimaryButton tertiary title="忘记密码？" disabled={loading} style={local.forgot} onPress={() => { setPassword(''); setReset(true) }} />}
+        <PrimaryButton title={register ? (sent ? '验证并登录' : '注册账号') : '登录'} loading={loading} disabled={loading} onPress={() => submit()} />
+        {sent && <PrimaryButton tertiary title={cooldown ? cooldown + ' 秒后可重新发送' : '重新发送验证码'} disabled={loading || cooldown > 0} onPress={() => submit(true)} />}
+      </View>
+      <View style={local.footer}><PrimaryButton tertiary title={register ? '返回登录' : '注册账号'} disabled={loading} onPress={switchMode} /></View>
     </ScrollView>
   </KeyboardAvoidingView>
 }
+
+const local = StyleSheet.create({
+  content: { flexGrow: 1, paddingTop: 32, paddingBottom: 28, gap: 0 },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  brandName: { color: colors.ink, fontFamily: 'sans-serif', fontSize: 20, fontWeight: '700', letterSpacing: -0.4 },
+  form: { gap: 16, paddingTop: 56 },
+  fields: { gap: 16, paddingTop: 8 },
+  forgot: { alignSelf: 'flex-end', marginTop: -8 },
+  footer: { marginTop: 'auto', paddingTop: 24, alignItems: 'center' },
+})

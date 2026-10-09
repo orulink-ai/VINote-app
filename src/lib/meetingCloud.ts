@@ -8,6 +8,10 @@ export type SummaryCheckpoint = { version: 5; model: string; title: string; sour
 type Options<T> = { checkpoint?: T; progress: (text: string) => void; save: (checkpoint: T) => Promise<void>; guard: () => Promise<void> }
 const remove = (uri: string) => FS.unlink(uri.replace('file://', '')).catch(() => {})
 const ASR_CHUNK_SECONDS = 60
+const EMPTY_ASR_MESSAGES = new Set([
+  'Aliyun ASR returned an empty transcript.',
+  'Volcengine ASR returned an empty transcript.',
+])
 
 async function retry<T>(operation: () => Promise<T>, guard: () => Promise<void>, progress: (text: string) => void): Promise<T> {
   for (let attempt = 0; ; attempt++) {
@@ -43,7 +47,14 @@ export async function transcribe(uri: string, model: string, options: Options<Tr
           const data = new FormData()
           data.append('file', { uri: chunk, name: 'meeting.wav', type: 'audio/wav' } as unknown as Blob)
           data.append('model', model)
-          return apiJson<{ text: string }>('/v1/asr/transcriptions', { method: 'POST', body: data })
+          try {
+            return await apiJson<{ text: string }>('/v1/asr/transcriptions', { method: 'POST', body: data })
+          } catch (error) {
+            // The provider explicitly recognized no speech in this chunk. Keep
+            // processing later chunks; all-empty recordings still fail below.
+            if (error instanceof ApiError && error.status === 502 && EMPTY_ASR_MESSAGES.has(error.message)) return { text: '' }
+            throw error
+          }
         }, options.guard, options.progress)
         if (typeof result?.text !== 'string') throw new Error('转写服务返回格式异常，此分段未保存，请重试')
         checkpoint.parts.push(result.text.trim())

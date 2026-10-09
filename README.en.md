@@ -2,10 +2,11 @@
 
 [简体中文](README.md) · [Build and deployment](docs/build-and-deployment.en.md) · [Android test evidence (Chinese)](docs/android-device-check-20260923.md)
 
-A native React Native Community CLI app using Tamagui 2.7.7, without Expo. Both Android and iOS include native recording, importing, and audio chunking; background behavior still needs device validation across OS versions.
+A native React Native Community CLI app using shared native components and a neutral theme, without Expo. Both Android and iOS include native recording, importing, and audio chunking; background behavior still needs device validation across OS versions.
 
 ## Architecture and features
 
+- v0.1.1 refreshes the icon and interface. Home provides recording, direct audio import, the latest recording and the latest note; login focuses on account actions.
 - Authentication connects directly to the configured Supabase project shared with desktop: password login, email OTP registration and email OTP password reset. Access and refresh tokens are stored in Keychain. Sign-out clears this device's credentials; desktop and phone may remain signed in simultaneously. The app does not require the desktop FastAPI process.
 - Model requests go directly to VILab using `/v1/models`, `/v1/default-models`, `/v1/asr/transcriptions` and `/openai/v1/chat/completions`. Choices are stored per account on the phone and snapshotted when processing starts.
 - Recording-only is the default and does not call AI. A draft is saved before recording; stopping saves original audio before optional processing. Rename, playback, system export/share, confirmed deletion and audio import through the system picker are available.
@@ -17,6 +18,9 @@ A native React Native Community CLI app using Tamagui 2.7.7, without Expo. Both 
 
 ## Network and platform limits
 
+Public Android account requests honor the system network proxy. Some networks reset direct Supabase TLS connections; sign-in and token refresh then require a reachable network or a system proxy. This release does not include a public authentication gateway.
+
+Explicit Aliyun or Volcengine empty-transcript ASR errors are saved as empty chunks so later chunks can continue. All-empty recordings still fail, and other service errors retain their retry/failure behavior.
 Test packages use VILab `http://192.168.1.143:9876`; production packages use `https://api.orulink.ai`. Both use the same HTTPS Supabase account project. Android test builds route account requests through `192.168.1.101:7890`; production has no LAN account proxy. Build commands select the deployment profile, so users need no configuration form.
 
 The public VILab HTTPS origin is configured. Static configuration validation does not prove DNS, TLS, upstream authentication or large-upload connectivity. Test packages still require LAN access.

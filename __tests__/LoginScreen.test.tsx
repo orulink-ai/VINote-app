@@ -24,7 +24,7 @@ test('cloud registration locks credentials and verifies before authentication', 
   const fill = async (label: string, value: string) => {
     await act(async () => { view.root.findAllByType(Field).find(field => field.props.label === label)!.props.onChangeText(value) })
   }
-  await press('没有账号？注册')
+  await press('注册账号')
   await fill('邮箱', ' User@Example.com ')
   await fill('密码', 'password123')
   await fill('确认密码', 'password123')
@@ -37,7 +37,7 @@ test('cloud registration locks credentials and verifies before authentication', 
   await press('验证并登录')
   expect(auth.verifyRegistration).toHaveBeenCalledWith('user@example.com', '123456')
   expect(authenticated).toHaveBeenCalledTimes(1)
-  await press('已有账号，返回登录')
+  await press('返回登录')
   expect(view.root.findAllByType(Field).every(field => field.props.value === '')).toBe(true)
   await act(async () => view.unmount())
 })

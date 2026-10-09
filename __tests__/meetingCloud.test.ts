@@ -1,9 +1,9 @@
 ﻿import { NativeModules } from 'react-native'
 import FS from 'react-native-fs'
-import { apiJson } from '../src/lib/api'
+import { apiJson, ApiError } from '../src/lib/api'
 import { TransportError } from '../src/lib/errors'
 import { transcribe, summarize, splitTranscript, splitMeetingEvidence, TranscriptionCheckpoint } from '../src/lib/meetingCloud'
-jest.mock('../src/lib/api', () => ({ apiJson: jest.fn(), ApiError: class extends Error {} }))
+jest.mock('../src/lib/api', () => ({ apiJson: jest.fn(), ApiError: jest.requireActual('../src/lib/errors').ApiError }))
 beforeEach(() => {
   jest.clearAllMocks()
   NativeModules.MeetingAudio = { toWav: jest.fn(async () => 'file:///cache/asr-full.wav'), wavInfo: jest.fn(async () => 130), wavChunk: jest.fn(async (_uri, index) => `file:///cache/asr-${index}.wav`) }
@@ -47,6 +47,42 @@ test('resumes completed chunks, saves silent sections and removes only temporary
   expect(checkpoints[1].parts).toEqual(['第一段', '', '最后一段'])
   expect(result).toContain('最后一段')
   expect(FS.unlink).not.toHaveBeenCalledWith('/original.m4a')
+})
+test.each(['Aliyun ASR returned an empty transcript.', 'Volcengine ASR returned an empty transcript.'])(
+  'continues after an explicitly empty ASR chunk: %s', async message => {
+    jest.mocked(apiJson).mockReset().mockRejectedValueOnce(new ApiError(message, 502)).mockResolvedValueOnce({ text: '后续语音' })
+    const save = jest.fn(async () => {})
+    const result = await transcribe('file:///original.m4a', 'asr', {
+      checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['此前语音'] },
+      guard: async () => {}, progress: jest.fn(), save,
+    })
+    expect(result).toContain('后续语音')
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ parts: ['此前语音', '', '后续语音'] }))
+    expect(apiJson).toHaveBeenCalledTimes(2)
+  },
+)
+test('does not treat other ASR gateway errors as silent audio', async () => {
+  jest.useFakeTimers()
+  jest.mocked(apiJson).mockReset().mockRejectedValue(new ApiError('Volcengine ASR disconnected before its final result', 502))
+  const save = jest.fn(async () => {})
+  const operation = transcribe('file:///original.m4a', 'asr', {
+    checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['此前语音', '其他语音'] },
+    guard: async () => {}, progress: jest.fn(), save,
+  })
+  const assertion = expect(operation).rejects.toThrow('Volcengine ASR disconnected before its final result')
+  await jest.runAllTimersAsync()
+  await assertion
+  expect(apiJson).toHaveBeenCalledTimes(3)
+  expect(save).not.toHaveBeenCalled()
+})
+test('reports no recognizable speech when every provider chunk is explicitly empty', async () => {
+  jest.mocked(apiJson).mockReset().mockRejectedValue(new ApiError('Volcengine ASR returned an empty transcript.', 502))
+  const save = jest.fn(async () => {})
+  await expect(transcribe('file:///original.m4a', 'asr', {
+    guard: async () => {}, progress: jest.fn(), save,
+  })).rejects.toThrow('未识别到有效语音')
+  expect(save).toHaveBeenCalledTimes(3)
+  expect(apiJson).toHaveBeenCalledTimes(3)
 })
 test('retains completed chunks when a later request fails', async () => {
   jest.mocked(apiJson).mockResolvedValueOnce({ text: '已完成' }).mockRejectedValueOnce(new Error('offline'))

@@ -52,6 +52,8 @@ npm 脚本会自动选择对应配置。直接运行 Gradle 前需先选择通�
 - `authBaseUrl`：HTTPS 账号入口 Origin，须保留 `/auth/v1`、Supabase 项目及认证行为；项目公开 publishable key 位于 `src/config/env.ts`，不能替换为 service_role 密钥。
 - `accountProxyHost` / `accountProxyPort`：Android 账号 CONNECT 出口；端口为 1–65535 的整数。公网通道主机必须为空字符串，端口仍保留有效整数。
 
+公网 Android 的 Supabase 账号请求使用系统 `ProxySelector`，业务 API 和 Metro 继续直接连接。网络限制可能导致 Supabase TLS 连接失败，需要可达网络或系统代理；本版不包含公网账号代理服务。独立公网 Debug 验收包可在选择公网配置后运行 `gradlew assembleDebug -PvinoteStandalone=true -PvinoteChannel=public`，其内置 JS、使用 `com.vinoteapp.dev` 与调试签名，不依赖 Metro。
+
 `lan` 允许 Android 明文网络以访问当前 HTTP 服务；`public` 禁用 Android 明文流量。公网校验要求 HTTPS DNS 域名，拒绝 IP 字面量、单标签主机及已知保留域名。**不执行 DNS 解析，不检测域名是否解析到私网，也不替代外网端到端验收。**
 
 公网 VILab 已配置 HTTPS 域名。仍需由部署方确认 DNS/证书、长请求超时和上传大小，并在蜂窝网络验收登录、模型列表、长音频、超时与重试。测试包仅适用于可访问内网服务的网络。

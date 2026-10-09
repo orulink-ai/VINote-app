@@ -34,22 +34,23 @@ export function NoteDetailScreen({ id, onBack, backLabel = '纪要列表' }: { i
     } },
   ])
   return <View style={styles.screen}>
-    <View style={{ paddingHorizontal: 24, paddingVertical: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
+    <View style={{ paddingHorizontal: 22, paddingVertical: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
       <Pressable accessibilityRole="button" disabled={deleting} onPress={onBack} hitSlop={12}><Text style={styles.link}>‹ {backLabel}</Text></Pressable>
       {note && <Pressable accessibilityRole="button" accessibilityLabel="删除纪要" disabled={deleting} onPress={confirmDelete} hitSlop={12}><Text style={{ color: deleting ? colors.muted : colors.danger }}>{deleting ? '正在删除…' : '删除'}</Text></Pressable>}
     </View>
     <ScrollView contentContainerStyle={styles.content}>
       {loading ? <View style={styles.card}><ActivityIndicator color={colors.primary} /><Text style={styles.subtitle}>正在加载纪要…</Text></View> : error ? <View style={styles.card}><Text accessibilityRole="alert" style={styles.noteBody}>{error}</Text><PrimaryButton title="重新加载" onPress={() => setAttempt(value => value + 1)} /></View> : note ? <>
+        <Text style={styles.eyebrow}>会议纪要 / 版本 {note.version || 1}</Text>
         <Text style={styles.title}>{note.title}</Text>
-        <Pressable accessibilityRole="button" disabled={deleting} onPress={() => setRenaming(true)} hitSlop={12}><Text style={styles.link}>修改名称</Text></Pressable>
-        <Text style={styles.subtitle}>版本 {note.version || 1} · {noteOrigin(note.generation_client)} · {new Date(note.created_at).toLocaleString('zh-CN')}</Text>
+        <Text style={styles.subtitle}>{noteOrigin(note.generation_client)} · {new Date(note.created_at).toLocaleString('zh-CN')}</Text>
+        <Pressable accessibilityRole="button" disabled={deleting} onPress={() => setRenaming(true)} hitSlop={12} style={{ paddingVertical: 8, alignSelf: 'flex-start' }}><Text style={styles.link}>修改名称  ↗</Text></Pressable>
         <PrimaryButton secondary title="分享纪要文件" loading={sharing} disabled={deleting} onPress={async () => {
           setSharing(true)
           try { await shareNoteFile(note) }
           catch (e) { Alert.alert('分享失败', e instanceof Error ? e.message : '请稍后重试') }
           finally { setSharing(false) }
         }} />
-        <View style={styles.card}>{note.content.trim() ? <MeetingMarkdown content={note.content} /> : <Text style={styles.subtitle}>这份纪要暂时没有正文。</Text>}</View>
+        <View style={[styles.card, { paddingVertical: 24 }]}>{note.content.trim() ? <MeetingMarkdown content={note.content} /> : <Text style={styles.subtitle}>这份纪要暂时没有正文。</Text>}</View>
       </> : null}
     </ScrollView>
     {renaming && note && <RenameDialog title={note.title} onClose={() => setRenaming(false)} onSave={async title => { setNote(await renameNote(id, title)) }} />}
