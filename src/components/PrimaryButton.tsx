@@ -1,8 +1,12 @@
 import React from 'react'
-import { ActivityIndicator } from 'react-native'
+import { ActivityIndicator, Pressable, Text, type PressableProps } from 'react-native'
 import { colors, styles } from '../design-system/theme'
-import { Button, Text } from 'tamagui'
 
-export function PrimaryButton({ title, loading, secondary, ...props }: { title: string; loading?: boolean; secondary?: boolean } & React.ComponentProps<typeof Button>) {
-  return <Button {...props} disabled={props.disabled || loading} accessibilityLabel={title} opacity={props.disabled ? 0.45 : 1} height={52} borderRadius="$3" backgroundColor={secondary ? colors.primarySoft : colors.primary} borderWidth={0} pressStyle={{ opacity: 0.75 }}>{loading ? <ActivityIndicator color={secondary ? colors.primary : '#FFF'} /> : <Text style={secondary ? styles.secondaryButtonText : styles.buttonText}>{title}</Text>}</Button>
+export function PrimaryButton({ title, loading, secondary, disabled, style, ...props }: { title: string; loading?: boolean; secondary?: boolean } & PressableProps) {
+  const unavailable = !!disabled || !!loading
+  return <Pressable {...props} disabled={unavailable} accessibilityRole="button" accessibilityLabel={title}
+    accessibilityState={{ disabled: unavailable, busy: !!loading }}
+    style={({ pressed }) => [secondary ? styles.secondaryButton : styles.button, unavailable && { opacity: 0.45 }, pressed && { opacity: 0.72 }, typeof style === 'function' ? style({ pressed }) : style]}>
+    {loading ? <ActivityIndicator color={secondary ? colors.primary : '#FFF'} /> : <Text style={secondary ? styles.secondaryButtonText : styles.buttonText}>{title}</Text>}
+  </Pressable>
 }

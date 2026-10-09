@@ -1,4 +1,4 @@
-import { NativeModules } from 'react-native'
+﻿import { NativeModules } from 'react-native'
 import FS from 'react-native-fs'
 import { apiJson } from '../src/lib/api'
 import { TransportError } from '../src/lib/errors'
@@ -6,7 +6,7 @@ import { transcribe, summarize, splitTranscript, splitMeetingEvidence, Transcrip
 jest.mock('../src/lib/api', () => ({ apiJson: jest.fn(), ApiError: class extends Error {} }))
 beforeEach(() => {
   jest.clearAllMocks()
-  NativeModules.MeetingAudio = { toWav: jest.fn(async () => 'file:///cache/asr-full.wav'), wavInfo: jest.fn(async () => 250), wavChunk: jest.fn(async (_uri, index) => `file:///cache/asr-${index}.wav`) }
+  NativeModules.MeetingAudio = { toWav: jest.fn(async () => 'file:///cache/asr-full.wav'), wavInfo: jest.fn(async () => 130), wavChunk: jest.fn(async (_uri, index) => `file:///cache/asr-${index}.wav`) }
   FS.unlink = jest.fn(async () => {})
 })
 afterEach(() => { jest.useRealTimers() })
@@ -17,7 +17,7 @@ test('retries transient transport failure without repeating saved chunks', async
   jest.mocked(apiJson).mockRejectedValueOnce(new TransportError('timeout')).mockResolvedValueOnce({ text: '最后一段' })
   const progress = jest.fn()
   const save = jest.fn(async () => {})
-  const operation = transcribe('file:///original.m4a', 'asr', { checkpoint: { version: 1, model: 'asr', duration: 250, parts: ['一', '二'] }, guard: async () => {}, progress, save })
+  const operation = transcribe('file:///original.m4a', 'asr', { checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['一', '二'] }, guard: async () => {}, progress, save })
   await jest.runAllTimersAsync()
   await expect(operation).resolves.toContain('最后一段')
   expect(apiJson).toHaveBeenCalledTimes(2)
@@ -31,7 +31,7 @@ test('transport retries are bounded and preserve previous checkpoints', async ()
   jest.mocked(apiJson).mockReset()
   jest.mocked(apiJson).mockRejectedValue(new TransportError('timeout'))
   const save = jest.fn(async () => {})
-  const operation = transcribe('file:///original.m4a', 'asr', { checkpoint: { version: 1, model: 'asr', duration: 250, parts: ['一', '二'] }, guard: async () => {}, progress: jest.fn(), save })
+  const operation = transcribe('file:///original.m4a', 'asr', { checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['一', '二'] }, guard: async () => {}, progress: jest.fn(), save })
   const assertion = expect(operation).rejects.toThrow('timeout')
   await jest.runAllTimersAsync()
   await assertion
@@ -42,7 +42,7 @@ test('transport retries are bounded and preserve previous checkpoints', async ()
 test('resumes completed chunks, saves silent sections and removes only temporary WAVs', async () => {
   jest.mocked(apiJson).mockResolvedValueOnce({ text: '' }).mockResolvedValueOnce({ text: '最后一段' })
   const checkpoints: TranscriptionCheckpoint[] = []
-  const result = await transcribe('file:///original.m4a', 'asr', { checkpoint: { version: 1, model: 'asr', duration: 250, parts: ['第一段'] }, guard: async () => {}, progress: jest.fn(), save: async value => { checkpoints.push(value) } })
+  const result = await transcribe('file:///original.m4a', 'asr', { checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['第一段'] }, guard: async () => {}, progress: jest.fn(), save: async value => { checkpoints.push(value) } })
   expect(NativeModules.MeetingAudio.wavChunk.mock.calls.map((args: unknown[]) => args[1])).toEqual([1, 2])
   expect(checkpoints[1].parts).toEqual(['第一段', '', '最后一段'])
   expect(result).toContain('最后一段')
@@ -87,7 +87,7 @@ test('a 28-minute meeting extracts timestamped facts before drafting and auditin
   const requests = jest.mocked(apiJson).mock.calls.map(([, init]) => JSON.parse(init!.body as string))
   expect(requests.filter(request => request.messages[0].content.includes('逐段提取')).length).toBeGreaterThan(1)
   expect(requests.some(request => request.messages[0].content.includes('核查纪要'))).toBe(true)
-  expect(requests.filter(request => request.messages[0].content.includes('逐段提取')).every(request => request.messages[0].content.includes('无意义数字'))).toBe(true)
+  expect(requests.filter(request => request.messages[0].content.includes('逐段提取')).every(request => request.messages[0].content.includes('不限于决策'))).toBe(true)
   expect(requests.every(request => request.model === 'llm')).toBe(true)
   expect(result).toContain('收音距离约三倍')
   expect(save).toHaveBeenCalledTimes(requests.length)
@@ -96,7 +96,7 @@ test('a 28-minute meeting extracts timestamped facts before drafting and auditin
 test('summary resumes saved fact extraction with the same model and prompt version', async () => {
   jest.mocked(apiJson).mockReset().mockResolvedValue({ choices: [{ message: { content: '# 新纪要' } }] } as never)
   const source = `[录音第 0 分钟起]\n${'会议内容。'.repeat(300)}`
-  const checkpoint = { version: 4 as const, model: 'llm', title: '会议', source, parts: { 'facts:0': '- [录音第 0 分钟起] 已提取事实' } }
+  const checkpoint = { version: 5 as const, model: 'llm', title: '会议', source, parts: { 'facts:0': '- [录音第 0 分钟起] 已提取事实' } }
   await summarize(source, '会议', 'llm', { checkpoint, guard: async () => {}, progress: jest.fn(), save: async () => {} })
   const requests = jest.mocked(apiJson).mock.calls.map(([, init]) => JSON.parse(init!.body as string))
   expect(requests.every(request => !request.messages[0].content.includes('逐段提取'))).toBe(true)

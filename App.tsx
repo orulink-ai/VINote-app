@@ -10,8 +10,6 @@ import { NoteDetailScreen } from './src/screens/NoteDetailScreen'
 import { fetchMe, signOut } from './src/lib/auth'
 import { readToken, clearToken, readAccountId } from './src/lib/storage'
 import { colors, styles } from './src/design-system/theme'
-import { TamaguiProvider } from 'tamagui'
-import { config } from './src/design-system/tamagui'
 import { ApiError } from './src/lib/api'
 import { resumePendingRecordings } from './src/features/recording/generateRecording'
 
@@ -22,6 +20,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('home')
   const [detailReturn, setDetailReturn] = useState<'notes' | 'recordings'>('notes')
   const [noteId, setNoteId] = useState<string | null>(null)
+  const [generateId, setGenerateId] = useState<string | null>(null)
   useEffect(() => {
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
       if (!authenticated || screen === 'home' || screen === 'record' || screen === 'recordings') return false
@@ -47,6 +46,6 @@ export default function App() {
     return () => subscription.remove()
   }, [authenticated])
   if (authenticated === null) return <SafeAreaProvider><View style={styles.loading}><ActivityIndicator color={colors.primary} /></View></SafeAreaProvider>
-  const content = !authenticated ? <LoginScreen onAuthenticated={() => setAuthenticated(true)} /> : screen === 'home' ? <HomeScreen onRecordings={() => setScreen('recordings')} onRecord={() => setScreen('record')} onNotes={() => setScreen('notes')} onSignOut={async () => { await signOut(); setScreen('home'); setNoteId(null); setAuthenticated(false) }} /> : screen === 'record' ? <RecordScreen onDone={() => setScreen('recordings')} onBack={() => setScreen('home')} /> : screen === 'recordings' ? <RecordingsScreen onBack={() => setScreen('home')} onOpenNote={id => { setDetailReturn('recordings'); setNoteId(id); setScreen('detail') }} /> : screen === 'notes' ? <NotesScreen onOpen={id => { setDetailReturn('notes'); setNoteId(id); setScreen('detail') }} onBack={() => setScreen('home')} /> : <NoteDetailScreen id={noteId!} backLabel={detailReturn === 'recordings' ? '录音库' : '纪要列表'} onBack={() => setScreen(detailReturn)} />
-  return <TamaguiProvider config={config} defaultTheme="light"><SafeAreaProvider><SafeAreaView style={styles.screen}><StatusBar barStyle="dark-content" />{content}</SafeAreaView></SafeAreaProvider></TamaguiProvider>
+  const content = !authenticated ? <LoginScreen onAuthenticated={() => setAuthenticated(true)} /> : screen === 'home' ? <HomeScreen onRecordings={() => { setGenerateId(null); setScreen('recordings') }} onRecord={() => setScreen('record')} onNotes={() => setScreen('notes')} onSignOut={async () => { await signOut(); setScreen('home'); setNoteId(null); setAuthenticated(false) }} /> : screen === 'record' ? <RecordScreen onDone={id => { setGenerateId(id || null); setScreen('recordings') }} onBack={() => setScreen('home')} /> : screen === 'recordings' ? <RecordingsScreen initialGenerateId={generateId} onBack={() => { setGenerateId(null); setScreen('home') }} onOpenNote={id => { setDetailReturn('recordings'); setNoteId(id); setScreen('detail') }} /> : screen === 'notes' ? <NotesScreen onOpen={id => { setDetailReturn('notes'); setNoteId(id); setScreen('detail') }} onBack={() => setScreen('home')} /> : <NoteDetailScreen id={noteId!} backLabel={detailReturn === 'recordings' ? '录音库' : '纪要列表'} onBack={() => setScreen(detailReturn)} />
+  return <SafeAreaProvider><SafeAreaView style={styles.screen}><StatusBar barStyle="dark-content" />{content}</SafeAreaView></SafeAreaProvider>
 }

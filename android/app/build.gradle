@@ -30,8 +30,8 @@ def requestedBuildTypes = gradle.startParameter.taskNames.collect { it.toLowerCa
 if (requestedBuildTypes.any { it.contains('release') } && deployment.channel != 'public') {
     throw new GradleException('Release builds require the public VINote deployment')
 }
-if (requestedBuildTypes.any { it.contains('debug') } && deployment.channel != 'lan') {
-    throw new GradleException('Debug builds require the test VINote deployment')
+if (requestedBuildTypes.any { it.contains('debug') } && deployment.channel == 'public' && requestedChannel != 'public') {
+    throw new GradleException('Public debug builds require -PvinoteChannel=public')
 }
 if (!(deployment.accountProxyHost ==~ /[a-zA-Z0-9.-]*/)) throw new GradleException("Invalid proxy host")
 
@@ -117,8 +117,8 @@ android {
         applicationId "com.vinoteapp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.1.0"
+        versionCode 5
+        versionName "0.1.0"
         buildConfigField "String", "ACCOUNT_PROXY_HOST", groovy.json.JsonOutput.toJson(deployment.accountProxyHost)
         buildConfigField "int", "ACCOUNT_PROXY_PORT", deployment.accountProxyPort.toString()
         buildConfigField 'boolean', 'VINOTE_STANDALONE', project.hasProperty('vinoteStandalone') ? 'true' : 'false'
@@ -145,8 +145,9 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
-            applicationIdSuffix '.test'
-            resValue 'string', 'app_name', 'VINote Test'
+            // 公网调试包独立安装，避免调试证书覆盖已签名的正式 VINote。
+            applicationIdSuffix deployment.channel == 'lan' ? '.test' : '.dev'
+            resValue 'string', 'app_name', deployment.channel == 'lan' ? 'VINote Test' : 'VINote Dev'
         }
         release {
             // 正式包必须由部署方签名，不能静默使用调试证书。

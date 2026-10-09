@@ -8,19 +8,23 @@ Use Node >=22.11 and `npm ci`. Android requires SDK/Build Tools 36.0.0, NDK 27.1
 
 The current Windows machine uses `D:/tool/sdk/android`. Only if Java reports `Unable to establish loopback connection`, create `D:/tmp` and set `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=D:/tmp -Djava.io.tmpdir=D:/tmp`. This is a machine-specific workaround, not a general prerequisite.
 
-Run `npm start`, then `npm run android` in another terminal. Authorize USB debugging and check `adb devices`. Use `adb reverse tcp:8081 tcp:8081` when forwarding Metro over USB. Source development is not a standalone demonstration package.
+Use one of the four Android commands below. Debug commands start Metro and install on a connected device. Check USB or wireless debugging with `adb devices`; use `adb reverse tcp:8081 tcp:8081` when forwarding Metro. If starting Metro separately, select the channel first with `npm run config:test` or `npm run config:public`.
 
 ## Android packages
 
-The test package uses the LAN VILab at http://192.168.1.143:9876; the production package uses https://api.orulink.ai, matching the desktop dev branch. The build scripts select the profile automatically. Android test builds use com.vinoteapp.test and display VINote Test, so they can coexist with production. Both use the same Supabase account project; production has no LAN account proxy.
+VINote Test uses the LAN VILab at http://192.168.1.143:9876; VINote uses the public VILab at https://api.orulink.ai. Scripts select the matching profile. Both use the same Supabase account project; public builds have no LAN account proxy.
 
-The npm build commands select and validate their deployment profile. For direct Gradle builds first run `npm run config:test` or `npm run config:public`. Gradle rejects channels that do not match the Debug/Release build type during configuration. Babel validates too, but native checks do not rely on Babel cache invalidation.
+For direct Gradle builds select a channel first and pass `-PvinoteChannel=test` or `-PvinoteChannel=public`; public Debug requires the explicit public property. Build different channels sequentially because they share the generated deployment file and Metro state.
 
 | Command | Output | Purpose |
 | --- | --- | --- |
-| `npm run android:standalone` | `android/app/build/outputs/apk/debug/app-debug.apk` | Embedded JS, developer support disabled, debug-signed acceptance APK |
-| `npm run android:release` | `android/app/build/outputs/apk/release/app-release.apk` | Release APK signed with your own key |
+| `npm run android:test:debug` | VINote Test, `com.vinoteapp.test` | LAN source debug with Metro |
+| `npm run android:test:apk` | `artifacts/android/vinote-test.apk` | Standalone LAN APK with embedded JS and debug signature |
+| `npm run android:vinote:debug` | VINote Dev, `com.vinoteapp.dev` | Public source debug with Metro and a separate package ID |
+| `npm run android:vinote:apk` | `artifacts/android/vinote.apk` | Public Release APK with production signing |
 | `npm run android:bundle` | `android/app/build/outputs/bundle/release/app-release.aab` | Signed store submission candidate; not directly installable with adb |
+
+`android:standalone` and `android:release` remain aliases. Debug commands accept `-- --device <serial>`. Both Debug channels use the same `app-debug.apk` output path, so the later build replaces that file. Public Debug cannot overwrite or share local recordings with the signed production app.
 
 Scripts use the repository Gradle wrapper: `cmd.exe /d /c gradlew.bat` on Windows and `./gradlew` elsewhere. Architectures follow `android/gradle.properties`; do not restrict the whole project to one test phone.
 
@@ -33,7 +37,7 @@ Release builds require all four environment variables and fail without them; the
 
 Inject credentials through a secure local environment or CI secrets, never Git, command logs or deployment JSON. Updates require a compatible signing identity and an increasing versionCode. A production signature cannot overwrite a debug-signed installation. Export important recordings before any uninstall. A successful Release build does not imply store approval.
 
-Install the acceptance APK using `adb -s <serial> install -r android/app/build/outputs/apk/debug/app-debug.apk`, then launch `adb -s <serial> shell am start -n com.vinoteapp.test/com.vinoteapp.MainActivity`. Standalone packages do not need USB or Metro, but retain their deployment network dependencies.
+Install the acceptance APK using `adb -s <serial> install -r artifacts/android/vinote-test.apk`, then launch `adb -s <serial> shell am start -n com.vinoteapp.test/com.vinoteapp.MainActivity`. Standalone packages do not need USB or Metro, but retain their deployment network dependencies.
 
 ## iOS
 

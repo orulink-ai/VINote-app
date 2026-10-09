@@ -1,5 +1,3 @@
-import { TamaguiProvider } from 'tamagui'
-import { config } from '../src/design-system/tamagui'
 import React from 'react'
 import { Alert } from 'react-native'
 import Renderer, { act } from 'react-test-renderer'
@@ -19,7 +17,7 @@ test('cloud registration locks credentials and verifies before authentication', 
   jest.spyOn(Alert, 'alert').mockImplementation(() => {})
   const authenticated = jest.fn()
   let view!: Renderer.ReactTestRenderer
-  await act(async () => { view = Renderer.create(<TamaguiProvider config={config} defaultTheme="light"><LoginScreen onAuthenticated={authenticated} /></TamaguiProvider>) })
+  await act(async () => { view = Renderer.create(<><LoginScreen onAuthenticated={authenticated} /></>) })
   const press = async (title: string) => {
     await act(async () => { await view.root.findAllByType(PrimaryButton).find(button => button.props.title === title)!.props.onPress() })
   }

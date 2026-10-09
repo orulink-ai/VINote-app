@@ -1,8 +1,7 @@
 import React from 'react'
-
+import { Text, TextInput, View, type TextInputProps } from 'react-native'
 import { styles } from '../design-system/theme'
-import { Input, Text, YStack } from 'tamagui'
 
-export function Field({ label, editable, ...props }: { label: string; editable?: boolean } & React.ComponentProps<typeof Input>) {
-  return <YStack><Text style={styles.label}>{label}</Text><Input {...props} disabled={editable === false} accessibilityLabel={label} style={styles.input} autoCapitalize="none" /></YStack>
+export function Field({ label, editable, ...props }: { label: string } & TextInputProps) {
+  return <View><Text style={styles.label}>{label}</Text><TextInput {...props} editable={editable !== false} accessibilityLabel={label} placeholderTextColor="#A1A1AA" style={styles.input} autoCapitalize="none" /></View>
 }
