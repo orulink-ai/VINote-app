@@ -11,10 +11,10 @@ export function CloudModelPicker({ disabled, onReady }: { disabled: boolean; onR
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(true)
-  const load = useCallback(async () => {
+  const load = useCallback(async (forceRefresh = false) => {
     setBusy(true); setError(''); onReady(false)
     try {
-      const [list, selected] = await Promise.all([loadModels(), loadSelection()])
+      const [list, selected] = await Promise.all([loadModels(forceRefresh), loadSelection()])
       setModels(list); setAsr(selected.asr_model); setLlm(selected.llm_model)
       const valid = (['asr', 'llm'] as const).every(kind => list.some(m => m.id === (kind === 'asr' ? selected.asr_model : selected.llm_model) && m.modelType === kind && m.runtimeStatus === 'available'))
       onReady(valid); setEditing(!valid)
@@ -47,6 +47,6 @@ export function CloudModelPicker({ disabled, onReady }: { disabled: boolean; onR
     </View>)}
     {!!error && <Text accessibilityRole="alert" style={{ color: colors.danger }}>{error}</Text>}
     <PrimaryButton title="确认模型" disabled={disabled || busy || !asr || !llm} loading={busy} onPress={save} />
-    <PrimaryButton title="刷新模型列表" secondary disabled={disabled || busy} onPress={load} />
+    <PrimaryButton title="刷新模型列表" secondary disabled={disabled || busy} onPress={() => load(true)} />
   </View>
 }

@@ -1,4 +1,4 @@
-﻿import { NativeModules } from 'react-native'
+import { NativeModules } from 'react-native'
 import FS from 'react-native-fs'
 import { apiJson, ApiError } from '../src/lib/api'
 import { TransportError } from '../src/lib/errors'
@@ -7,6 +7,7 @@ jest.mock('../src/lib/api', () => ({ apiJson: jest.fn(), ApiError: jest.requireA
 beforeEach(() => {
   jest.clearAllMocks()
   NativeModules.MeetingAudio = { toWav: jest.fn(async () => 'file:///cache/asr-full.wav'), wavInfo: jest.fn(async () => 130), wavChunk: jest.fn(async (_uri, index) => `file:///cache/asr-${index}.wav`) }
+  jest.mocked(FS.stat).mockResolvedValue({ size: 10000, mtime: new Date(1700000000000) } as never)
   FS.unlink = jest.fn(async () => {})
 })
 afterEach(() => { jest.useRealTimers() })
@@ -36,7 +37,7 @@ test('transport retries are bounded and preserve previous checkpoints', async ()
   await jest.runAllTimersAsync()
   await assertion
   expect(apiJson).toHaveBeenCalledTimes(3)
-  expect(save).not.toHaveBeenCalled()
+  expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ parts: expect.arrayContaining([null]) }))
   jest.mocked(apiJson).mockReset()
 })
 test('resumes completed chunks, saves silent sections and removes only temporary WAVs', async () => {
@@ -44,7 +45,7 @@ test('resumes completed chunks, saves silent sections and removes only temporary
   const checkpoints: TranscriptionCheckpoint[] = []
   const result = await transcribe('file:///original.m4a', 'asr', { checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['第一段'] }, guard: async () => {}, progress: jest.fn(), save: async value => { checkpoints.push(value) } })
   expect(NativeModules.MeetingAudio.wavChunk.mock.calls.map((args: unknown[]) => args[1])).toEqual([1, 2])
-  expect(checkpoints[1].parts).toEqual(['第一段', '', '最后一段'])
+  expect(checkpoints.at(-1)?.parts).toEqual(['第一段', '', '最后一段'])
   expect(result).toContain('最后一段')
   expect(FS.unlink).not.toHaveBeenCalledWith('/original.m4a')
 })
@@ -73,7 +74,7 @@ test('does not treat other ASR gateway errors as silent audio', async () => {
   await jest.runAllTimersAsync()
   await assertion
   expect(apiJson).toHaveBeenCalledTimes(3)
-  expect(save).not.toHaveBeenCalled()
+  expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ parts: expect.arrayContaining([null]) }))
 })
 test('reports no recognizable speech when every provider chunk is explicitly empty', async () => {
   jest.mocked(apiJson).mockReset().mockRejectedValue(new ApiError('Volcengine ASR returned an empty transcript.', 502))
@@ -81,15 +82,15 @@ test('reports no recognizable speech when every provider chunk is explicitly emp
   await expect(transcribe('file:///original.m4a', 'asr', {
     guard: async () => {}, progress: jest.fn(), save,
   })).rejects.toThrow('未识别到有效语音')
-  expect(save).toHaveBeenCalledTimes(3)
+  expect(save).toHaveBeenCalledTimes(4)
   expect(apiJson).toHaveBeenCalledTimes(3)
 })
 test('retains completed chunks when a later request fails', async () => {
   jest.mocked(apiJson).mockResolvedValueOnce({ text: '已完成' }).mockRejectedValueOnce(new Error('offline'))
   const save = jest.fn(async () => {})
   await expect(transcribe('file:///original.m4a', 'asr', { guard: async () => {}, progress: jest.fn(), save })).rejects.toThrow('offline')
-  expect(save).toHaveBeenCalledTimes(1)
-  expect(save).toHaveBeenCalledWith(expect.objectContaining({ parts: ['已完成'] }))
+  expect(save).toHaveBeenCalledTimes(2)
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({ parts: ['已完成', null, null] }))
 })
 test('splitting preserves every character and bounds each summary input', () => {
   const text = '会议讨论。'.repeat(5000)
@@ -114,25 +115,25 @@ test('a 28-minute meeting extracts timestamped facts before drafting and auditin
     const request = JSON.parse(init!.body as string)
     const system: string = request.messages[0].content
     if (system.includes('逐段提取')) return { choices: [{ message: { content: '- [录音第 20 分钟起] 收音距离约三倍\n- [录音第 26 分钟起] 会后确认工程师时间' } }] } as never
-    if (system.includes('核查纪要')) return { choices: [{ message: { content: '# 语音键盘收音方案讨论\n\n收音距离约三倍。[录音第 20 分钟起]\n\n会后确认工程师时间。[录音第 26 分钟起]' } }] } as never
+    if (system.includes('核查初稿')) return { choices: [{ message: { content: '# 语音键盘收音方案讨论\n\n收音距离约三倍。[录音第 20 分钟起]\n\n会后确认工程师时间。[录音第 26 分钟起]' } }] } as never
     return { choices: [{ message: { content: '# 初稿' } }] } as never
   })
-  const transcript = Array.from({ length: 15 }, (_, i) => `[录音第 ${i * 2} 分钟起]\n${'会议讨论声学参数与后续测试。'.repeat(20)}`).join('\n\n')
+  const transcript = Array.from({ length: 15 }, (_, i) => `[录音第 ${i * 2} 分钟起]\n${'会议讨论声学参数与后续测试。'.repeat(80)}`).join('\n\n')
   const save = jest.fn(async () => {})
   const result = await summarize(transcript, '语音键盘会议', 'llm', { guard: async () => {}, progress: jest.fn(), save })
   const requests = jest.mocked(apiJson).mock.calls.map(([, init]) => JSON.parse(init!.body as string))
   expect(requests.filter(request => request.messages[0].content.includes('逐段提取')).length).toBeGreaterThan(1)
-  expect(requests.some(request => request.messages[0].content.includes('核查纪要'))).toBe(true)
+  expect(requests.some(request => request.messages[0].content.includes('核查初稿'))).toBe(true)
   expect(requests.filter(request => request.messages[0].content.includes('逐段提取')).every(request => request.messages[0].content.includes('不限于决策'))).toBe(true)
   expect(requests.every(request => request.model === 'llm')).toBe(true)
   expect(result).toContain('收音距离约三倍')
   expect(save).toHaveBeenCalledTimes(requests.length)
 })
 
-test('summary resumes saved fact extraction with the same model and prompt version', async () => {
+test('short summary uses original evidence instead of an unnecessary cached fact sheet', async () => {
   jest.mocked(apiJson).mockReset().mockResolvedValue({ choices: [{ message: { content: '# 新纪要' } }] } as never)
   const source = `[录音第 0 分钟起]\n${'会议内容。'.repeat(300)}`
-  const checkpoint = { version: 5 as const, model: 'llm', title: '会议', source, parts: { 'facts:0': '- [录音第 0 分钟起] 已提取事实' } }
+  const checkpoint = { version: 8 as const, model: 'llm', title: '会议', source, parts: { 'facts:0': '- [录音第 0 分钟起] 已提取事实' } }
   await summarize(source, '会议', 'llm', { checkpoint, guard: async () => {}, progress: jest.fn(), save: async () => {} })
   const requests = jest.mocked(apiJson).mock.calls.map(([, init]) => JSON.parse(init!.body as string))
   expect(requests.every(request => !request.messages[0].content.includes('逐段提取'))).toBe(true)
@@ -143,5 +144,5 @@ test('an older summary prompt checkpoint is regenerated', async () => {
   const source = '[录音第 0 分钟起]\n讨论新的参数。'
   await summarize(source, '会议', 'llm', { checkpoint: { version: 3, model: 'llm', title: '会议', source, parts: { 'facts:0': '旧事实', draft: '旧初稿', audit: '旧纪要' } } as never,
     guard: async () => {}, progress: jest.fn(), save: async () => {} })
-  expect(apiJson).toHaveBeenCalledTimes(3)
+  expect(apiJson).toHaveBeenCalledTimes(2)
 })

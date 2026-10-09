@@ -5,7 +5,7 @@ import { colors, styles } from '../design-system/theme'
 import { PrimaryButton } from '../components/PrimaryButton'
 import { RenameDialog } from '../components/RenameDialog'
 import { CloudModelPicker } from '../components/CloudModelPicker'
-import { deleteRecording, exportRecording, listRecordings, LocalRecording, saveRecording, importRecording } from '../features/recording/recordingLibrary'
+import { deleteRecording, exportRecording, listRecordings, LocalRecording, renameRecording, importRecording } from '../features/recording/recordingLibrary'
 import { listNotes } from '../lib/notes'
 import type { Note } from '../types/api'
 import { generateRecording } from '../features/recording/generateRecording'
@@ -94,10 +94,10 @@ export function RecordingsScreen({ onBack, onOpenNote, initialGenerateId, initia
         <PrimaryButton secondary style={{ flex: 1 }} title="导出原音频" disabled={!!working || importing} onPress={() => { setPhase('正在导出…'); void action(item, () => exportRecording(item)) }} />
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 2 }}>
-        <Pressable accessibilityRole="button" disabled={!!working || importing} hitSlop={10} onPress={() => setRenaming(item)}><Text style={styles.link}>修改名称</Text></Pressable>
-        <Pressable accessibilityRole="button" disabled={!!working || importing} hitSlop={10} onPress={() => Alert.alert('删除本机录音？', '原音频删除后无法恢复，已经保存的会议纪要不受影响。', [{ text: '取消', style: 'cancel' }, { text: '删除', style: 'destructive', onPress: () => { setPhase('正在删除…'); void action(item, async () => { if (playing === item.id) { await Sound.stopPlayer(); setPlaying(null) } await deleteRecording(item) }) } }])}><Text style={[styles.link, { color: colors.danger }]}>删除录音</Text></Pressable>
+        <Pressable accessibilityRole="button" disabled={!!working || importing || item.generation?.status === 'pending'} hitSlop={10} onPress={() => setRenaming(item)}><Text style={styles.link}>修改名称</Text></Pressable>
+        <Pressable accessibilityRole="button" disabled={!!working || importing || item.generation?.status === 'pending'} hitSlop={10} onPress={() => Alert.alert('删除本机录音？', '原音频删除后无法恢复，已经保存的会议纪要不受影响。', [{ text: '取消', style: 'cancel' }, { text: '删除', style: 'destructive', onPress: () => { setPhase('正在删除…'); void action(item, async () => { if (playing === item.id) { await Sound.stopPlayer(); setPlaying(null) } await deleteRecording(item) }) } }])}><Text style={[styles.link, { color: colors.danger }]}>删除录音</Text></Pressable>
       </View>
     </View>} />
-    {renaming && <RenameDialog title={renaming.title} onClose={() => setRenaming(null)} onSave={async title => { await saveRecording({ ...renaming, title, titleSource: 'manual' }); await load() }} />}
+    {renaming && <RenameDialog title={renaming.title} onClose={() => setRenaming(null)} onSave={async title => { await renameRecording(renaming, title); await load() }} />}
   </View>
 }

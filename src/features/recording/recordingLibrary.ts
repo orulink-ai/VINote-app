@@ -4,9 +4,11 @@ import { NativeModules } from 'react-native'
 import { recordingTitle } from './recordingTitle'
 import { readAccountId } from '../../lib/storage'
 import type { TranscriptionCheckpoint, SummaryCheckpoint } from '../../lib/meetingCloud'
+import type { ProcessingTiming } from '../../lib/processingHelpers'
 import { listNotes } from '../../lib/notes'
+import { acquireRecordingLock } from './recordingProcessing'
 
-export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; lastNoteVersion?: number; error?: string; transcriptionCheckpoint?: TranscriptionCheckpoint; summaryCheckpoint?: SummaryCheckpoint; generation?: { status: 'pending' | 'paused'; asrModel: string; llmModel: string; startedAt: string; version?: number } }
+export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; lastNoteVersion?: number; error?: string; processingTimings?: ProcessingTiming[]; transcriptionCheckpoint?: TranscriptionCheckpoint; summaryCheckpoint?: SummaryCheckpoint; generation?: { status: 'pending' | 'paused'; asrModel: string; llmModel: string; startedAt: string; version?: number } }
 export async function accountDirectory() {
   const account = await readAccountId()
   if (!account) throw new Error('请联网登录一次，以确认本机录音所属账号')
@@ -69,13 +71,37 @@ export async function exportRecording(record: LocalRecording) {
   await Share.open({ url: record.uri, type: ({ mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', aac: 'audio/aac', ogg: 'audio/ogg' } as Record<string, string>)[extension(record)] || 'audio/mp4', title: record.title, failOnCancel: false, saveToFiles: true })
 }
 export async function deleteRecording(record: LocalRecording) {
-  const directory = await accountDirectory()
-  const path = record.uri.replace('file://', '')
-  if (path !== `${directory}/${record.id}.${extension(record)}` || !/^[a-zA-Z0-9-]+$/.test(record.id)) throw new Error('录音路径无效')
-  if (await FS.exists(path)) await FS.unlink(path)
-  const metadata = `${directory}/${record.id}.json`
-  if (await FS.exists(metadata)) await FS.unlink(metadata)
-  if (await FS.exists(`${metadata}.tmp`)) await FS.unlink(`${metadata}.tmp`)
+  const owner = await readAccountId()
+  if (!owner) throw new Error('请重新登录')
+  const release = acquireRecordingLock(owner, record.id)
+  try {
+    const directory = await accountDirectory()
+    const path = record.uri.replace('file://', '')
+    if (path !== `${directory}/${record.id}.${extension(record)}`) throw new Error('录音路径无效')
+    const current = (await listRecordings()).find(item => item.id === record.id)
+    if (!current || current.uri !== record.uri) throw new Error('录音已变化，请刷新后重试')
+    if (current.generation?.status === 'pending') throw new Error('录音正在生成纪要，请稍后操作')
+    if (await FS.exists(path)) await FS.unlink(path)
+    const metadata = `${directory}/${record.id}.json`
+    if (await FS.exists(metadata)) await FS.unlink(metadata)
+    if (await FS.exists(`${metadata}.tmp`)) await FS.unlink(`${metadata}.tmp`)
+  } finally { release() }
+}
+
+export async function renameRecording(record: LocalRecording, title: string) {
+  const cleanTitle = title.trim()
+  if (!cleanTitle || cleanTitle.length > 120) throw new Error('请输入 1–120 字的会议名称')
+  const owner = await readAccountId()
+  if (!owner) throw new Error('请重新登录')
+  const release = acquireRecordingLock(owner, record.id)
+  try {
+    const directory = await accountDirectory()
+    if (record.uri.replace('file://', '') !== `${directory}/${record.id}.${extension(record)}`) throw new Error('录音路径无效')
+    const current = (await listRecordings()).find(item => item.id === record.id)
+    if (!current || current.uri !== record.uri) throw new Error('录音已变化，请刷新后重试')
+    if (current.generation?.status === 'pending') throw new Error('录音正在生成纪要，请稍后操作')
+    return await saveRecording({ ...current, title: cleanTitle, titleSource: 'manual' })
+  } finally { release() }
 }
 
 export async function unlinkRecordingNote(noteId: string, deletedVersion: number, taskId?: string | null) {

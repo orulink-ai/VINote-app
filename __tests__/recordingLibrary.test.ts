@@ -1,6 +1,7 @@
 import FS from 'react-native-fs'
 import { readAccountId } from '../src/lib/storage'
-import { recordingPath, saveRecording, listRecordings, createRecordingDraft, finalizeRecording, importRecording, unlinkRecordingNote } from '../src/features/recording/recordingLibrary'
+import { recordingPath, saveRecording, listRecordings, createRecordingDraft, finalizeRecording, importRecording, unlinkRecordingNote, deleteRecording, renameRecording } from '../src/features/recording/recordingLibrary'
+import { acquireRecordingLock } from '../src/features/recording/recordingProcessing'
 import { listNotes } from '../src/lib/notes'
 import { NativeModules } from 'react-native'
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn() }))
@@ -66,4 +67,43 @@ test('deleting a version still updates history when the latest-note pointer is s
   await unlinkRecordingNote('app-one-v3', 3, 'one')
   const written = jest.mocked(FS.writeFile).mock.calls.at(-1)?.[1] as string
   expect(JSON.parse(written)).toMatchObject({ noteId: 'app-one-v2', lastNoteVersion: 3 })
+})
+test('pending generation prevents rename and deletion even with a stale UI record', async () => {
+  jest.mocked(readAccountId).mockResolvedValue('alice')
+  jest.mocked(FS.exists).mockResolvedValue(true)
+  jest.mocked(FS.readDir).mockResolvedValue([{ name: 'one.json', path: '/metadata/one.json' }] as never)
+  const record = { id: 'one', uri: 'file:///documents/recordings/accounts/alice/one.m4a', title: '原名', createdAt: '', duration: 10 }
+  jest.mocked(FS.readFile).mockResolvedValue(JSON.stringify({ ...record, generation: { status: 'pending' } }))
+  await expect(renameRecording(record, '新名字')).rejects.toThrow('正在生成')
+  await expect(deleteRecording(record)).rejects.toThrow('正在生成')
+  expect(FS.unlink).not.toHaveBeenCalled()
+  expect(FS.writeFile).not.toHaveBeenCalled()
+})
+test('rename uses current paused metadata and keeps the lock through the save', async () => {
+  jest.mocked(readAccountId).mockResolvedValue('alice')
+  jest.mocked(FS.exists).mockResolvedValue(true)
+  jest.mocked(FS.readDir).mockResolvedValue([{ name: 'one.json', path: '/metadata/one.json' }] as never)
+  const record = { id: 'one', uri: 'file:///documents/recordings/accounts/alice/one.m4a', title: '原名', createdAt: '', duration: 10 }
+  jest.mocked(FS.readFile).mockResolvedValue(JSON.stringify({ ...record, transcript: '已完成转写', generation: { status: 'paused' } }))
+  let finishWrite!: () => void
+  jest.mocked(FS.writeFile).mockImplementationOnce(() => new Promise<void>(resolve => { finishWrite = resolve }))
+  const operation = renameRecording(record, '新名字')
+  while (!finishWrite) await Promise.resolve()
+  expect(() => acquireRecordingLock('alice', 'one')).toThrow('正在处理中')
+  finishWrite()
+  await expect(operation).resolves.toMatchObject({ title: '新名字', transcript: '已完成转写', generation: { status: 'paused' } })
+  const release = acquireRecordingLock('alice', 'one')
+  release()
+})
+test('failed deletion releases the recording lock', async () => {
+  jest.mocked(readAccountId).mockResolvedValue('alice')
+  jest.mocked(FS.exists).mockResolvedValue(true)
+  jest.mocked(FS.readDir).mockResolvedValue([{ name: 'one.json', path: '/metadata/one.json' }] as never)
+  const record = { id: 'one', uri: 'file:///documents/recordings/accounts/alice/one.m4a', title: '原名', createdAt: '', duration: 10,
+    generation: { status: 'paused' as const, asrModel: 'asr', llmModel: 'llm', startedAt: '' } }
+  jest.mocked(FS.readFile).mockResolvedValue(JSON.stringify(record))
+  jest.mocked(FS.unlink).mockRejectedValueOnce(new Error('disk error'))
+  await expect(deleteRecording(record)).rejects.toThrow('disk error')
+  const release = acquireRecordingLock('alice', 'one')
+  release()
 })

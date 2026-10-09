@@ -6,14 +6,16 @@ import { LocalRecording, listRecordings, saveRecording } from './recordingLibrar
 import { recordingTitle, summaryTopic } from './recordingTitle'
 import { NativeModules } from 'react-native'
 import { ApiError, TransportError } from '../../lib/errors'
-const active = new Set<string>()
+import { measure, ProcessingTiming } from '../../lib/processingHelpers'
+import { acquireRecordingLock } from './recordingProcessing'
 export async function generateRecording(record: LocalRecording, progress: (text: string) => void, resume = false) {
   const owner = await readAccountId()
   if (!owner) throw new Error('请重新登录')
-  const key = `${owner}:${record.id}`
-  if (active.has(key)) throw new Error('这条录音正在处理中')
-  active.add(key)
+  const release = acquireRecordingLock(owner, record.id)
   let current = record
+  const started = Date.now()
+  const timings: ProcessingTiming[] = []
+  const timing = (event: ProcessingTiming) => { timings.push(event) }
   let backgroundStarted = false
   const guard = async () => {
     if (await readAccountId() !== owner) throw new Error('账号已切换，处理已停止；已完成进度保留在原账号')
@@ -35,12 +37,12 @@ export async function generateRecording(record: LocalRecording, progress: (text:
     const selection = resume && record.generation
       ? { asr_model: record.generation.asrModel, llm_model: record.generation.llmModel }
       : await loadSelection()
-    const models = await loadModels()
+    const models = await measure('models', loadModels, timing)
     for (const kind of ['asr', 'llm'] as const) {
       if (!models.some(m => m.id === selection[`${kind}_model`] && m.modelType === kind && m.runtimeStatus === 'available')) throw new Error('所选模型不可用，请重新选择云端模型')
     }
     const version = record.generation?.version || Math.max((record.lastNoteVersion || 0) + 1, await nextNoteVersion(record.id))
-    current = { ...record, taskId: undefined, error: undefined, summaryCheckpoint: record.generation ? record.summaryCheckpoint : undefined,
+    current = { ...record, taskId: undefined, error: undefined, processingTimings: timings, summaryCheckpoint: record.generation ? record.summaryCheckpoint : undefined,
       generation: { status: 'pending', asrModel: selection.asr_model, llmModel: selection.llm_model,
         startedAt: record.generation?.startedAt || new Date().toISOString(), version } }
     await saveRecording(current)
@@ -50,7 +52,7 @@ export async function generateRecording(record: LocalRecording, progress: (text:
     if (!current.transcript || current.asrModel !== selection.asr_model) {
       current = { ...current, transcript: undefined, summaryCheckpoint: undefined }
       const transcript = await transcribe(record.uri, selection.asr_model, {
-        checkpoint: current.transcriptionCheckpoint, progress, guard,
+        checkpoint: current.transcriptionCheckpoint, progress, guard, timing, owner,
         save: async checkpoint => {
           await guard()
           current = { ...current, transcriptionCheckpoint: checkpoint }
@@ -62,7 +64,7 @@ export async function generateRecording(record: LocalRecording, progress: (text:
     }
     progress('转写已保存，正在生成会议纪要…')
     const content = await summarize(current.transcript!, record.title, selection.llm_model, {
-      checkpoint: current.summaryCheckpoint, progress, guard,
+      checkpoint: current.summaryCheckpoint, progress, guard, timing, owner,
       save: async checkpoint => {
         await guard()
         current = { ...current, summaryCheckpoint: checkpoint }
@@ -73,19 +75,21 @@ export async function generateRecording(record: LocalRecording, progress: (text:
     const topic = summaryTopic(content)
     const noteTitle = recordingTitle(current.createdAt, topic || (current.titleSource === 'manual' ? current.title : '会议交流'))
     if (current.titleSource === 'default' && topic) current = { ...current, title: noteTitle, titleSource: 'ai' }
-    const note = await createNote({ title: noteTitle, content, task_id: record.id }, owner, version)
+    const note = await measure('note-save', () => createNote({ title: noteTitle, content, task_id: record.id }, owner, version), timing)
+    timing({ stage: 'total', durationMs: Date.now() - started })
     await saveRecording({ ...current, noteId: note.id, lastNoteVersion: Math.max(current.lastNoteVersion || 0, version),
       llmModel: selection.llm_model, generation: undefined })
     return note.id
   } catch (error) {
-    const transient = error instanceof TransportError || (error instanceof ApiError && [502, 503, 504].includes(error.status))
+    timing({ stage: 'total', durationMs: Date.now() - started })
+    const transient = error instanceof TransportError || (error instanceof ApiError && [429, 502, 503, 504].includes(error.status))
     if (await readAccountId() === owner) await saveRecording({ ...current,
       generation: current.generation && { ...current.generation, status: transient ? 'pending' : 'paused' },
       error: error instanceof Error ? error.message : '处理失败' })
     throw error
   } finally {
     if (backgroundStarted) await NativeModules.MeetingProcessing.stop().catch(() => {})
-    active.delete(key)
+    release()
   }
 }
 
