@@ -57,3 +57,8 @@ RecordScreen 录音前选择模式且在 finish() 中生成。RecordingsScreen �
 - 正式 VINote 1.3.0 在 TNA-AN00 登录后，导入现有的 12 秒真实语音样本，选择公网 ASR `asr:14:volcengine-asr:8:bigmodel` 与 LLM `deepseek-v4.1-flash`。转写、事实提取、纪要生成和事实核查均完成；App 展示版本 1 纪要，标题按导入时间和讨论主题生成，原始录音仍在录音库。这证明短样本公网端到端通过，不代表长录音公网稳定性。
 - 合入前执行 `npm test -- --runInBand`：15 套件 41 项通过；`npm run typecheck` 通过；`npm run lint`：0 错误、48 警告；`npm run test:scripts`：4 项通过。两版 APK 的构建、包名及正式签名核查已在上一节记录。
 - 手机直连 Supabase 域名的独立 curl 仍出现 TLS reset，尽管这次 App 登录及完整生成成功。账号网络通道存在间歇性故障，需后续由服务或网络侧治理；本次代码没有修改认证服务路径。
+
+## 2026-10-09 首次 GitHub Release 版本准备
+
+- 用户要求 PR 合并后从 App `main` 分别发布 VINote Test v0.1.0 和 VINote v0.1.0，并明确两份 APK 内的版本号也应为 0.1.0。为使合并后的 `main` 能直接作为发布源码，合并前将 Android `versionName` 与 npm 包版本改为 `0.1.0`，Android `versionCode` 从 4 递增到 5，以支持真机升级。历史段落中 1.3.0 是此前验收包的实际版本，不回写为本次发布版本。
+- 两个 Release 将使用不同标签，分别附带对应 APK 和中文说明；需要在合并后的 `main` 重新构建并核对最终包，不能复用合并前的旧 APK。
