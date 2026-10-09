@@ -90,14 +90,17 @@ export function RecordScreen({ onDone, onBack }: { onDone: (recordingId?: string
     } finally { lock.current = false; setBusy(false) }
   }
   const stop = () => Alert.alert('结束录音？', '先保存原始音频，再决定是否生成会议纪要。', [{ text: '继续录音', style: 'cancel' }, { text: '结束并保存', onPress: finish }])
-  return <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-    <Text style={{ color: colors.muted, fontSize: 12, letterSpacing: 2 }}>CAPTURE / 会议录音</Text>
+  return <ScrollView style={styles.screen} contentContainerStyle={[styles.content, styles.recordContent]}>
     <Text style={styles.title}>新录音</Text>
+    <Text style={[styles.subtitle, { marginBottom: 12 }]}>结束时先保存原声，再选择是否生成纪要。</Text>
     <Field label="录音名称" placeholder="例如：产品周会（可选）" value={title} onChangeText={setTitle} editable={!busy && !pending} maxLength={120} />
-    <Text style={styles.subtitle}>先录音并保存原始音频，结束后再选择是否生成纪要和使用的模型。</Text>
-    <View style={[styles.card, styles.recordCard]}><Text style={[styles.timer, { color: recording ? colors.danger : colors.ink }]}>{String(Math.floor(seconds / 60)).padStart(2, '0')}:{String(seconds % 60).padStart(2, '0')}</Text><Text style={styles.subtitle}>{busy ? phase : recording ? '● 正在录音' : pending ? '等待保存，可重试' : '待开始'}</Text></View>
+    <View style={[styles.card, styles.recordCard]}>
+      <View style={{ width: 70, height: 70, borderRadius: 35, backgroundColor: recording ? colors.dangerSoft : colors.primarySoft, alignItems: 'center', justifyContent: 'center' }}><View style={{ width: 22, height: 22, borderRadius: recording ? 5 : 11, backgroundColor: recording ? colors.danger : colors.ink }} /></View>
+      <Text style={styles.timer}>{String(Math.floor(seconds / 60)).padStart(2, '0')}:{String(seconds % 60).padStart(2, '0')}</Text>
+      <Text accessibilityLiveRegion="polite" style={[styles.subtitle, { color: recording ? colors.danger : colors.muted }]}>{busy ? phase : recording ? '正在录音 · 原声持续保存' : pending ? '等待保存，可重试' : '准备好后点击开始'}</Text>
+    </View>
     <PrimaryButton title={busy ? phase : recording ? '结束录音' : pending ? '重试保存录音' : '开始录音'} loading={busy} disabled={busy} onPress={recording ? stop : pending ? finish : start} />
-    <Text style={styles.subtitle}>录音支持切换其他 App 和锁屏。生成纪要会逐段保存进度；切回 App 后可继续。iOS 后台处理时长受系统限制。</Text>
+    <Text style={styles.subtitle}>录音时可以切换 App 或锁屏。</Text>
     <PrimaryButton secondary title="返回首页" disabled={recording || busy || !!pending} onPress={onBack} />
   </ScrollView>
 }

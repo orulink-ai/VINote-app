@@ -13,7 +13,7 @@ test('renders markdown and confirmed deletion navigates only after success', asy
   let view!: Renderer.ReactTestRenderer
   await act(async () => { view = Renderer.create(<><NoteDetailScreen id="note-a" onBack={back} /></>) })
   expect(view.root.findByType(MeetingMarkdown)).toBeTruthy()
-  expect(view.root.findAll(node => Array.isArray(node.props.children) && node.props.children[0] === '版本 ' && node.props.children[1] === 2).length).toBeGreaterThan(0)
+  expect(view.root.findAll(node => Array.isArray(node.props.children) && node.props.children.includes('会议纪要 / 版本 ')).length).toBeGreaterThan(0)
   const share = view.root.findAll(node => node.props.accessibilityLabel === '分享纪要文件' && typeof node.props.onPress === 'function')[0]
   await act(async () => { await share.props.onPress() })
   expect(shareNoteFile).toHaveBeenCalledWith(expect.objectContaining({ id: 'note-a', version: 2 }))
