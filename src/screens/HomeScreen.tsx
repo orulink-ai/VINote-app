@@ -1,32 +1,32 @@
 import React from 'react'
-import { ScrollView, Text, Pressable } from 'react-native'
-import { Card, YStack, XStack } from 'tamagui'
-import { PrimaryButton } from '../components/PrimaryButton'
+import { ScrollView, Text, Pressable, View } from 'react-native'
 import { colors, styles } from '../design-system/theme'
 
+function HomeAction({ eyebrow, title, description, onPress }: { eyebrow: string; title: string; description: string; onPress: () => void }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={title} onPress={onPress}
+    style={({ pressed }) => [styles.card, { minHeight: 136, justifyContent: 'space-between', backgroundColor: pressed ? colors.primarySoft : colors.card }]}>
+    <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600', letterSpacing: 1 }}>{eyebrow}</Text>
+    <View style={{ gap: 5 }}>
+      <Text style={[styles.noteTitle, { fontSize: 20 }]}>{title}  ↗</Text>
+      <Text style={styles.subtitle}>{description}</Text>
+    </View>
+  </Pressable>
+}
+
 export function HomeScreen({ onRecord, onRecordings, onNotes, onSignOut }: { onRecord: () => void; onRecordings: () => void; onNotes: () => void; onSignOut: () => void }) {
-  return <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-    <XStack justifyContent="space-between" alignItems="center">
-      <Text style={styles.noteTitle}>VINote</Text>
-      <Pressable accessibilityRole="button" onPress={onSignOut} hitSlop={12}><Text style={styles.subtitle}>退出登录</Text></Pressable>
-    </XStack>
-    <YStack paddingVertical={24} gap={10}>
+  return <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: 22, paddingBottom: 40 }]}>
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+      <Text style={[styles.noteTitle, { fontSize: 21, letterSpacing: -0.6 }]}>VINote</Text>
+      <Pressable accessibilityRole="button" onPress={onSignOut} hitSlop={12} style={{ padding: 8 }}><Text style={styles.subtitle}>退出</Text></Pressable>
+    </View>
+    <View style={{ paddingTop: 66, paddingBottom: 44, gap: 12 }}>
       <Text style={styles.subtitle}>{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</Text>
-      <Text style={[styles.title, { fontSize: 32, lineHeight: 43 }]}>记录。回听。整理。</Text>
-      <Text style={styles.subtitle}>从一段录音，到清晰可回顾的会议纪要。</Text>
-    </YStack>
-    <Card backgroundColor={colors.primary} borderRadius={12} padding={24} gap={20}>
-      <Text style={{ color: '#BFE5D7', fontSize: 13, letterSpacing: 2 }}>会议录音</Text>
-      <Text style={{ color: '#FFFFFF', fontSize: 24, fontWeight: '600' }}>新建会议录音</Text>
-      <Text style={{ color: '#DCEEE7', fontSize: 15, lineHeight: 23 }}>仅保存原始音频，或结束后生成会议纪要。</Text>
-      <PrimaryButton secondary title="开始录音" onPress={onRecord} />
-    </Card>
-    <Card backgroundColor="white" borderRadius={12} padding={22} gap={12} borderWidth={1} borderColor={colors.line}>
-      <Text style={styles.noteTitle}>我的会议纪要</Text>
-      <Text style={styles.subtitle}>回顾讨论内容、会议结论与后续行动。</Text>
-      <PrimaryButton secondary title="查看会议纪要" onPress={onNotes} />
-    </Card>
-    <PrimaryButton secondary title="录音库 / 原始音频" onPress={onRecordings} />
-    <Text style={[styles.subtitle, { textAlign: 'center', paddingVertical: 16 }]}>录制 → 云端转写 → 生成纪要</Text>
+      <Text style={[styles.title, { fontSize: 34, lineHeight: 44 }]}>今天记录什么？</Text>
+      <Text style={styles.subtitle}>录制会议，保存原声，再整理成清晰的纪要。</Text>
+    </View>
+    <HomeAction eyebrow="01 / CAPTURE" title="开始会议录音" description="录制并保存原始音频" onPress={onRecord} />
+    <HomeAction eyebrow="02 / LIBRARY" title="录音库" description="回听、导出或生成会议纪要" onPress={onRecordings} />
+    <HomeAction eyebrow="03 / NOTES" title="会议纪要" description="搜索和阅读已生成的内容" onPress={onNotes} />
+    <Text style={[styles.subtitle, { textAlign: 'center', fontSize: 13, paddingTop: 12 }]}>录制  ·  回听  ·  整理</Text>
   </ScrollView>
 }
