@@ -21,6 +21,7 @@ RCT_REMAP_METHOD(audioInfo, audioInfo:(NSString *)uri resolver:(RCTPromiseResolv
   resolve(@(file.length/file.processingFormat.sampleRate));
 }
 static NSURL *cacheURL(void) { return [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"asr-%@.wav", NSUUID.UUID.UUIDString]]]; }
+static const unsigned long long kChunkBytes = 60ULL * 32000ULL;
 static NSData *header(uint32_t size) {
   uint8_t bytes[44] = {0};
   memcpy(bytes, "RIFF", 4); memcpy(bytes+8, "WAVEfmt ", 8); memcpy(bytes+36, "data", 4);
@@ -38,10 +39,23 @@ static BOOL validCache(NSURL *url, unsigned long long *size) {
   NSData *data = [file readDataOfLength:44]; [file closeFile];
   return [data isEqualToData:header((uint32_t)(*size-44))];
 }
+static BOOL canonicalPCM16Wav(NSURL *url) {
+  if (![url.pathExtension.lowercaseString isEqualToString:@"wav"]) return NO;
+  unsigned long long size = [[NSFileManager.defaultManager attributesOfItemAtPath:url.path error:nil] fileSize];
+  if (size <= 44 || size > INT32_MAX) return NO;
+  NSFileHandle *file = [NSFileHandle fileHandleForReadingAtPath:url.path];
+  NSData *data = [file readDataOfLength:44]; [file closeFile];
+  return [data isEqualToData:header((uint32_t)(size-44))];
+}
 RCT_REMAP_METHOD(toWav, toWav:(NSString *)uri resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   NSURL *source=[NSURL URLWithString:uri];
   NSString *documents=NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
   if (!source.isFileURL || ![source.URLByResolvingSymlinksInPath.path hasPrefix:[documents.stringByResolvingSymlinksInPath stringByAppendingString:@"/"]]) { reject(@"AUDIO_PATH", @"录音路径无效", nil); return; }
+  if (canonicalPCM16Wav(source)) {
+    NSURL *output = cacheURL(); NSError *copyError = nil;
+    if (![NSFileManager.defaultManager copyItemAtURL:source toURL:output error:&copyError]) { reject(@"AUDIO_CONVERSION", @"音频缓存复制失败", copyError); return; }
+    resolve(output.absoluteString); return;
+  }
   ExtAudioFileRef input=NULL; NSURL *output=cacheURL(); NSFileHandle *file=nil;
   @try {
     if (ExtAudioFileOpenURL((__bridge CFURLRef)source, &input)!=noErr) @throw [NSException exceptionWithName:@"audio" reason:@"无法解码所选音频" userInfo:nil];
@@ -68,15 +82,23 @@ RCT_REMAP_METHOD(wavInfo, wavInfo:(NSString *)uri resolver:(RCTPromiseResolveBlo
 }
 RCT_REMAP_METHOD(wavChunk, wavChunk:(NSString *)uri index:(double)index resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   unsigned long long size=0; NSURL *source=[NSURL URLWithString:uri];
-  if (!isfinite(index) || index<0 || floor(index)!=index || !validCache(source,&size) || index >= ceil((size-44)/3840000.0)) { reject(@"AUDIO_CHUNK",@"分段无效",nil); return; }
-  NSURL *output=cacheURL(); NSFileHandle *file=[NSFileHandle fileHandleForReadingAtPath:source.path];
+  if (!isfinite(index) || index<0 || floor(index)!=index || !validCache(source,&size) || index >= ceil((size-44)/(double)kChunkBytes)) { reject(@"AUDIO_CHUNK",@"分段无效",nil); return; }
+  NSURL *output=cacheURL(); NSFileHandle *file=[NSFileHandle fileHandleForReadingAtPath:source.path]; NSFileHandle *target=nil;
   @try {
-    unsigned long long offset=(unsigned long long)index*3840000; NSUInteger count=(NSUInteger)MIN(3840000ULL,size-44-offset);
-    [file seekToFileOffset:44+offset]; NSData *part=[file readDataOfLength:count];
-    NSMutableData *data=[header((uint32_t)count) mutableCopy]; [data appendData:part];
-    NSError *error=nil;
-    if (part.length!=count || ![data writeToURL:output options:NSDataWritingAtomic error:&error]) { reject(@"AUDIO_CHUNK",@"音频分段写入失败",error); return; }
+    unsigned long long offset=(unsigned long long)index*kChunkBytes; NSUInteger count=(NSUInteger)MIN(kChunkBytes,size-44-offset);
+    [NSFileManager.defaultManager createFileAtPath:output.path contents:header((uint32_t)count) attributes:nil];
+    target=[NSFileHandle fileHandleForWritingAtPath:output.path];
+    if (!file || !target) @throw [NSException exceptionWithName:@"audio" reason:@"音频分段文件无法打开" userInfo:nil];
+    [file seekToFileOffset:44+offset]; [target seekToEndOfFile];
+    NSUInteger remaining=count;
+    while (remaining>0) {
+      NSData *part=[file readDataOfLength:MIN(remaining,65536)];
+      if (!part.length) @throw [NSException exceptionWithName:@"audio" reason:@"音频分段读取不完整" userInfo:nil];
+      [target writeData:part]; remaining-=part.length;
+    }
+    [target closeFile]; target=nil;
     resolve(output.absoluteString);
-  } @catch (NSException *e) { reject(@"AUDIO_CHUNK",e.reason,nil); } @finally { [file closeFile]; }
+  } @catch (NSException *e) { [NSFileManager.defaultManager removeItemAtURL:output error:nil]; reject(@"AUDIO_CHUNK",e.reason,nil); }
+  @finally { [file closeFile]; [target closeFile]; }
 }
 @end

@@ -1,4 +1,4 @@
-﻿import { generateRecording, resumePendingRecordings } from '../src/features/recording/generateRecording'
+import { generateRecording, resumePendingRecordings } from '../src/features/recording/generateRecording'
 import { listRecordings, saveRecording } from '../src/features/recording/recordingLibrary'
 import { transcribe, summarize } from '../src/lib/meetingCloud'
 import { createNote, getNote, nextNoteVersion } from '../src/lib/notes'
@@ -69,7 +69,7 @@ test('another summary of the same recording uses a new version and fresh summary
   jest.mocked(summarize).mockResolvedValue('# 第二版')
   jest.mocked(createNote).mockResolvedValue({ id: 'app-repeat-v2' } as never)
   const record = { id: 'repeat', uri: 'file:///repeat.m4a', title: '会议', createdAt: '', duration: 600,
-    noteId: 'app-repeat', transcript: '完整转写', asrModel: 'asr1', summaryCheckpoint: { version: 5 as const, model: 'llm1', title: '会议', source: '完整转写', parts: { audit: '# 第一版' } } }
+    noteId: 'app-repeat', transcript: '完整转写', asrModel: 'asr1', summaryCheckpoint: { version: 8 as const, model: 'llm1', title: '会议', source: '完整转写', parts: { audit: '# 第一版' } } }
   await generateRecording(record, jest.fn())
   expect(summarize).toHaveBeenCalledWith('完整转写', '会议', 'llm1', expect.objectContaining({ checkpoint: undefined }))
   expect(createNote).toHaveBeenCalledWith(expect.objectContaining({ task_id: 'repeat' }), 'alice', 2)

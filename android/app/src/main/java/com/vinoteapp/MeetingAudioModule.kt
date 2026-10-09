@@ -50,6 +50,23 @@ class MeetingAudioModule(private val context: ReactApplicationContext) : ReactCo
     return source
   }
 
+  /** Only copy the exact WAV layout produced by this module; other WAVs use MediaCodec. */
+  private fun isCanonicalPcmWav(source: File): Boolean {
+    if (!source.extension.equals("wav", ignoreCase = true) || source.length() <= 44) return false
+    return try {
+      RandomAccessFile(source, "r").use { input ->
+        val bytes = ByteArray(44); input.readFully(bytes)
+        val header = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        String(bytes, 0, 4) == "RIFF" && header.getInt(4).toLong() == source.length() - 8 &&
+          String(bytes, 8, 8) == "WAVEfmt " && header.getInt(16) == 16 &&
+          header.getShort(20).toInt() == 1 && header.getShort(22).toInt() == 1 &&
+          header.getInt(24) == 16000 && header.getInt(28) == 32000 &&
+          header.getShort(32).toInt() == 2 && header.getShort(34).toInt() == 16 &&
+          String(bytes, 36, 4) == "data" && header.getInt(40).toLong() == source.length() - 44
+      }
+    } catch (_: Exception) { false }
+  }
+
   @ReactMethod
   fun wavChunk(uri: String, index: Double, promise: Promise) { worker.execute {
     val output = File(context.cacheDir, "asr-${UUID.randomUUID()}.wav")
@@ -84,6 +101,11 @@ class MeetingAudioModule(private val context: ReactApplicationContext) : ReactCo
     try {
       val source = File(Uri.parse(uri).path ?: uri).canonicalFile
       require(source.path.startsWith(context.filesDir.canonicalPath + File.separator)) { "录音路径无效" }
+      if (isCanonicalPcmWav(source)) {
+        source.inputStream().use { input -> output.outputStream().use { target -> input.copyTo(target) } }
+        promise.resolve(Uri.fromFile(output).toString())
+        return@execute
+      }
       extractor.setDataSource(source.path)
       val track = (0 until extractor.trackCount).firstOrNull { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true } ?: error("没有音轨")
       extractor.selectTrack(track)
@@ -106,8 +128,9 @@ class MeetingAudioModule(private val context: ReactApplicationContext) : ReactCo
         val info = MediaCodec.BufferInfo()
         while (!outputEnded) {
           check(System.nanoTime() - lastProgress < 30_000_000_000L) { "音频转换超时" }
+          var fedInput = false
           if (!inputEnded) {
-            val index = codec.dequeueInputBuffer(10000)
+            val index = codec.dequeueInputBuffer(0)
             if (index >= 0) {
               val count = extractor.readSampleData(codec.getInputBuffer(index)!!, 0)
               if (count < 0) {
@@ -115,10 +138,13 @@ class MeetingAudioModule(private val context: ReactApplicationContext) : ReactCo
               } else {
                 codec.queueInputBuffer(index, 0, count, extractor.sampleTime, 0); extractor.advance()
               }
+              fedInput = true
               lastProgress = System.nanoTime()
             }
           }
-          val index = codec.dequeueOutputBuffer(info, 10000)
+          // Drain ready output immediately after feeding input. Block only when
+          // neither side made progress, so packet count does not add 10 ms waits.
+          val index = codec.dequeueOutputBuffer(info, if (fedInput) 0 else 10000)
           if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
             val decoded = codec.outputFormat
             rate = decoded.getInteger(MediaFormat.KEY_SAMPLE_RATE)

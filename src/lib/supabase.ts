@@ -11,24 +11,29 @@ export async function authRequest<T>(path: string, body?: unknown, token?: strin
     ...(body ? { body: JSON.stringify(body) } : {}),
   }, 30000))
 }
-let refreshing: Promise<string> | null = null
-export async function accessToken(refresh = false): Promise<string> {
+let refreshing: { account: string; promise: Promise<string> } | null = null
+export async function accessToken(refresh = false, expectedAccountId?: string): Promise<string> {
   const session = await readSession()
   if (!session) throw new ApiError('请重新登录账号', 401)
+  const account = session.user.id
+  if (expectedAccountId && account !== expectedAccountId) throw new ApiError('账号已切换，请重新操作', 401)
   if (!refresh) return session.access_token
-  if (!refreshing) {
+  if (!refreshing || refreshing.account !== account) {
     const revision = sessionRevision()
-    refreshing = (async () => {
+    const request = (async () => {
       let next: Session
       try { next = await authRequest<Session>('/token?grant_type=refresh_token', { refresh_token: session.refresh_token }) }
       catch (error) {
         if (error instanceof ApiError && [400, 401, 403].includes(error.status)) throw new ApiError('登录已过期，请重新登录', 401)
         throw error
       }
-      if (sessionRevision() !== revision) throw new ApiError('账号已切换，请重新操作', 401)
+      if (sessionRevision() !== revision || next.user?.id !== account) throw new ApiError('账号已切换，请重新操作', 401)
       await saveSession(next)
       return next.access_token
-    })().finally(() => { refreshing = null })
+    })()
+    const entry = { account, promise: request }
+    refreshing = entry
+    void request.finally(() => { if (refreshing === entry) refreshing = null }).catch(() => {})
   }
-  return refreshing
+  return refreshing.promise
 }
