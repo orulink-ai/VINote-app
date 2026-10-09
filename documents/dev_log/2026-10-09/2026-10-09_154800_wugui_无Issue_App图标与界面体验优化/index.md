@@ -90,3 +90,8 @@
 - `npm run android:vinote:apk` 正式构建成功。凭据只由当前 Windows 用户解密本机 DPAPI 并注入构建进程，未输出、提交或嵌入签名私钥/口令。正式证书 SHA-256 与 v0.1.0 一致（`a605ee8f7c7de80caa6c56a9fa4218a80d89c918b1a223b1b7c9c314adfa7dbf`），apksigner 校验通过。
 - 正式 APK 为 `com.vinoteapp`，versionName 0.1.1、versionCode 6，文件 SHA-256 为 `115a20e4a9f0e8cbd6905bb09726242cba4816cf2513e65d02da18b067b837b0`。只发布公网正式 Android APK；不将已有旧 Debug/内网制品冒充本版产物。
 - 当前代码与构建已准备完成，PR 合入与 GitHub Release 上传由后续实际操作确认。发行状态与产物以 [v0.1.1 发行页面](https://github.com/orulink-ai/VINote-app/releases/tag/v0.1.1) 为准。
+
+### 2026-10-09 17:38 发布 PR
+
+- 已提交并推送当前修改，创建 [PR #6](https://github.com/orulink-ai/VINote-app/pull/6)。版本文件保留原有行尾，仅修改根版本号，避免锁文件产生无关格式差异。
+- 同一任务的只读代码审查未发现确定的功能阻断；版本号与网络边界已在上述代码和文档中处理。准备按用户授权普通 merge 合入并发布，操作结果以 PR 和 Release 页面为准。
