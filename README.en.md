@@ -10,7 +10,7 @@ A native React Native Community CLI app using Tamagui 2.7.7, without Expo. Both 
 - Model requests go directly to VILab using `/v1/models`, `/v1/default-models`, `/v1/asr/transcriptions` and `/openai/v1/chat/completions`. Choices are stored per account on the phone and snapshotted when processing starts.
 - Recording-only is the default and does not call AI. A draft is saved before recording; stopping saves original audio before optional processing. Rename, playback, system export/share, confirmed deletion and audio import through the system picker are available.
 - Default titles use the local start time plus a recording label. Generated minutes can provide an AI topic title; manual titles are preserved. Imports use import time, not an inferred meeting time. Recording and note titles are independent.
-- Long audio is decoded to 16 kHz mono PCM16 WAV and uploaded in chunks of at most 120 seconds. Successful chunks are checkpointed. Retrying with the same ASR model reuses them; changing ASR model restarts transcription. Each run retains its selected ASR and LLM models, extracts timestamped facts by section, drafts detailed minutes, then audits omissions, numbers, and actions. Each stage is checkpointed. Transient network/502/503/504 failures retry at most twice. After an interruption, reopening the app resumes pending tasks; failed tasks can be retried manually. There is no persistent server task or guaranteed background generation.
+- Long audio is decoded to 16 kHz mono PCM16 WAV and uploaded in chunks of at most 60 seconds. Successful chunks are checkpointed. Retrying with the same ASR model reuses them; changing ASR model restarts transcription. Each run retains its selected ASR and LLM models, extracts timestamped facts by section, drafts detailed minutes, then audits omissions, numbers, and actions. Each stage is checkpointed. Transient network/502/503/504 failures retry at most twice. After an interruption, reopening the app resumes pending tasks; failed tasks can be retried manually. There is no persistent server task or guaranteed background generation.
 - Notes support search, Markdown rendering, rename and deletion. Deleting a note preserves its original recording. App notes identify their mobile origin; the desktop backend has its own generation-origin field. These labels do not synchronize data.
 - One recording can produce multiple independent numbered note versions. Open each version from the recording library and share the selected version as a Markdown file through the system share sheet. Deleting a version keeps the original audio and other versions.
 - **Recordings, notes and checkpoints are local to the phone and isolated by account. There is no cross-device sync. Uninstalling or clearing app data removes them; export important audio first.**
@@ -32,12 +32,13 @@ Use Node >=22.11, npm, the Android SDK/NDK, JDK and native tooling. iOS addition
 ```sh
 npm ci
 npm run config:check
-npm start
-# In another terminal, after authorizing USB debugging:
-npm run android
+npm run android:test:debug      # LAN VINote Test with Metro
+npm run android:test:apk        # Standalone LAN APK
+npm run android:vinote:debug    # Public VINote Dev with Metro
+npm run android:vinote:apk      # Signed public APK
 ```
 
-Source development uses Metro. If the phone cannot reach the development machine, run `adb reverse tcp:8081 tcp:8081`. `npm run android:standalone` builds a debug-signed APK with embedded JS and no Metro dependency. Production packages use a separate signing flow.
+Debug modes use Metro. If the phone cannot reach the development machine, run `adb reverse tcp:8081 tcp:8081`. Public Debug uses a separate package ID so its debug signature cannot overwrite production. Both APK modes embed JS; see the [build instructions](docs/build-and-deployment.en.md).
 
 ## Validation status
 

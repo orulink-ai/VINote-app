@@ -8,19 +8,23 @@ Node >=22.11；`npm ci` 使用锁文件安装。Android 使用 SDK/Build Tools 3
 
 本机已知 SDK 在 `D:/tool/sdk/android`。若 JDK 报 `Unable to establish loopback connection`，仅在受影响机器上创建 `D:/tmp` 并设置 `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=D:/tmp -Djava.io.tmpdir=D:/tmp`，不是所有机器的必需参数。
 
-`npm start` 启动 Metro；另开终端执行 `npm run android`。手机授权 USB 调试后可用 `adb devices` 检查；需要 USB 转发时执行 `adb reverse tcp:8081 tcp:8081`。此开发模式不是可离线演示的独立安装包。
+四个 Android 命令见下表；Debug 命令会启动 Metro 并安装到已连接设备。手机授权 USB 或无线调试后可用 `adb devices` 检查；需要转发时执行 `adb reverse tcp:8081 tcp:8081`。Debug 模式需要 Metro，不能作为离线演示包。单独执行 `npm start` 时沿用上次选中的通道；先用 `npm run config:test` 或 `npm run config:public` 切换。
 
 ## Android 包
 
-测试版使用内网 VILab http://192.168.1.143:9876，正式版使用公网 VILab https://api.orulink.ai，与桌面端远端 dev 的服务地址保持一致。打包脚本自动选择对应配置；源码开发默认选择测试配置。测试包的 Android 应用 ID 为 com.vinoteapp.test，显示名为 VINote Test，可与正式版同时安装。账号认证仍使用同一 Supabase 项目，正式版不使用内网账号代理。
+VINote Test 使用内网 VILab http://192.168.1.143:9876；VINote 使用公网 VILab https://api.orulink.ai。脚本自动选择对应配置，两版可同时安装。账号认证仍使用同一 Supabase 项目，公网包不使用内网账号代理。
 
-npm 构建脚本会自动选择对应配置；直接运行 Gradle 前需执行 npm run config:test 或 npm run config:public，Gradle 配置阶段会拒绝与 Debug/Release 构建类型不符的通道。Babel 也执行校验，但不能仅依赖其缓存失效。
+npm 脚本会自动选择对应配置。直接运行 Gradle 前需先选择通道，并传入 `-PvinoteChannel=test` 或 `-PvinoteChannel=public`；公网 Debug 必须显式传入 public。Babel 也执行配置校验。切换通道时请顺序构建，不要同时运行两个不同通道的 Metro/Gradle 任务。
 
 | 命令 | 产物 | 用途 |
 | --- | --- | --- |
-| `npm run android:standalone` | `android/app/build/outputs/apk/debug/app-debug.apk` | 内置 JS、关闭开发支持、调试签名的独立验收包 |
-| `npm run android:release` | `android/app/build/outputs/apk/release/app-release.apk` | 自有签名的 Release APK |
+| `npm run android:test:debug` | VINote Test，`com.vinoteapp.test` | 内网源码调试，连接 Metro |
+| `npm run android:test:apk` | `artifacts/android/vinote-test.apk` | 内网独立 APK，内置 JS，调试签名 |
+| `npm run android:vinote:debug` | VINote Dev，`com.vinoteapp.dev` | 公网源码调试，连接 Metro；独立包名保护正式版数据 |
+| `npm run android:vinote:apk` | `artifacts/android/vinote.apk` | 公网正式 APK，使用发布签名 |
 | `npm run android:bundle` | `android/app/build/outputs/bundle/release/app-release.aab` | 自有签名的商店上传候选 AAB，不能直接 adb 安装 |
+
+`android:standalone`、`android:release` 保留为旧命令别名。Debug 命令可通过 `-- --device <设备序列号>` 指定手机。两个 Debug 通道共用 `app-debug.apk` 路径，后构建的包会覆盖该文件；请以脚本名和 APK 实际包名为准。公网 Debug 使用调试签名和独立 `com.vinoteapp.dev`，不能覆盖已签名的 `com.vinoteapp`，也不共享本机录音。
 
 脚本调用项目 Gradle wrapper；Windows 使用 `cmd.exe /d /c gradlew.bat`，其他平台使用 `./gradlew`。默认架构遵循 `android/gradle.properties`，无需为当前手机把全项目固定为单一架构。
 
@@ -33,7 +37,7 @@ npm 构建脚本会自动选择对应配置；直接运行 Gradle 前需执行 n
 
 通过本机安全环境或 CI 密钥注入，不写入 Git、命令日志或部署 JSON。同一应用后续升级必须使用兼容签名及递增 versionCode；调试签名与正式签名不能直接互相覆盖。不要为覆盖安装直接卸载含重要录音的应用，应先导出。Release 构建通过不等于商店审核通过。
 
-安装验收包：`adb -s <序列号> install -r android/app/build/outputs/apk/debug/app-debug.apk`，再运行 `adb -s <序列号> shell am start -n com.vinoteapp.test/com.vinoteapp.MainActivity`。独立包不依赖数据线或 Metro，但仍有部署网络依赖。
+安装验收包：`adb -s <序列号> install -r artifacts/android/vinote-test.apk`，再运行 `adb -s <序列号> shell am start -n com.vinoteapp.test/com.vinoteapp.MainActivity`。独立包不依赖数据线或 Metro，但仍有部署网络依赖。
 
 ## iOS
 

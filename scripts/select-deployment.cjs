@@ -9,7 +9,7 @@ function selectDeployment(channel) {
   if (deployment.channel !== (channel === 'test' ? 'lan' : 'public')) throw new Error('Deployment channel mismatch')
   const target = path.join(configDir, 'deployment.json')
   const temporary = target + '.' + process.pid + '.tmp'
-  fs.writeFileSync(temporary, JSON.stringify(deployment, null, 2))
+  fs.writeFileSync(temporary, JSON.stringify(deployment, null, 2) + '\n')
   fs.renameSync(temporary, target)
   console.log('Selected ' + channel + ' deployment')
   return deployment

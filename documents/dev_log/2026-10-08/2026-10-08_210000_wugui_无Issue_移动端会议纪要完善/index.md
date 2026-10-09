@@ -42,3 +42,18 @@ RecordScreen 录音前选择模式且在 finish() 中生成。RecordingsScreen �
 - 正式签名 APK 已安装到 Honor TNA-AN00。60 秒真实语音 WAV 成功经系统文件选择器导入，录音库保留本机文件，并正确显示“仅保存音频 / 生成会议纪要”以及模型选择入口。
 - 本次继续生成时，模型列表加载出现“账号服务连接失败”。排查显示当前网络直连 Supabase 账号域名时 TLS 连接被重置，而会议公网接口正常；令牌刷新因此无法继续。电脑经内网代理访问该账号域名返回 HTTP 401（说明可达），但正式包不配置内网代理。临时手机系统代理未使 App 恢复模型加载，已恢复系统代理为关闭。此次未能完成正式包公网端到端生成、纪要标题与回放验收。
 - 当前 PR #4 保持开放；不可把公网 ASR 直接请求成功等同于正式 App 完整验收，也不可在此状态下合并发布。需提供手机可直连的 HTTPS 账号入口或修复当前网络至 Supabase 的 TLS 连接后继续真机验证。临时认证 token 文件已删除。
+
+## 2026-10-09 双通道运行脚本与真机复查
+
+- 远端 PR #4 最新提交 cc8779a 与本地功能代码仅有档案差异；正式 APK 使用现有签名覆盖安装到 TNA-AN00，包名 com.vinoteapp，版本 1.3.0。用户自行登录后可进入首页，覆盖安装后仍保持登录。手机录音库和纪要列表均为空，当前无旧生成任务可继续验收；本次只使用 install -r，未执行卸载或清除数据。
+- 手机直连 Supabase 项目域名的 curl 在 TLS 握手阶段出现 Connection reset by peer（HTTP 000），同手机访问公网 VILab /health 为 200；本机访问 Supabase /auth/v1/settings 返回 401（未带 key）。这支持手机网络到账号域名的连接问题，不能据此断言 Supabase 服务整体宕机。用户随后重试登录成功。
+- 新增四个 Android 命令：内网 VINote Test 的 Debug/APK，公网 VINote 的 Debug/APK；公网 Debug 使用独立 com.vinoteapp.dev 以免调试签名覆盖正式版。脚本测试、配置检查、TypeScript 检查通过。内网 APK 构建并安装为 com.vinoteapp.test；公网 Debug 构建并安装为 com.vinoteapp.dev；正式 APK 构建、签名校验及覆盖安装通过。两种 APK 输出到 artifacts/android，不纳入版本库。
+- 公网生成端到端验收仍未完成：手机当前本机录音库为空。PR 暂不合并。
+- 公网 Debug 验证后移除新装的 com.vinoteapp.dev，手机最终保留 VINote Test 与 VINote 两个应用；两种 APK 分别保存为 artifacts/android/vinote-test.apk 和 vinote.apk。
+
+## 2026-10-09 合入前审查与公网验收
+
+- 审查 PR #4 与 origin/main 的差异，重点核对录音先保存再生成、原生 60 秒分段与 TypeScript 进度一致、检查点版本、手动标题、Android 两通道包名及签名隔离。未发现必须阻止合入的代码问题。
+- 正式 VINote 1.3.0 在 TNA-AN00 登录后，导入现有的 12 秒真实语音样本，选择公网 ASR `asr:14:volcengine-asr:8:bigmodel` 与 LLM `deepseek-v4.1-flash`。转写、事实提取、纪要生成和事实核查均完成；App 展示版本 1 纪要，标题按导入时间和讨论主题生成，原始录音仍在录音库。这证明短样本公网端到端通过，不代表长录音公网稳定性。
+- 合入前执行 `npm test -- --runInBand`：15 套件 41 项通过；`npm run typecheck` 通过；`npm run lint`：0 错误、48 警告；`npm run test:scripts`：4 项通过。两版 APK 的构建、包名及正式签名核查已在上一节记录。
+- 手机直连 Supabase 域名的独立 curl 仍出现 TLS reset，尽管这次 App 登录及完整生成成功。账号网络通道存在间歇性故障，需后续由服务或网络侧治理；本次代码没有修改认证服务路径。
