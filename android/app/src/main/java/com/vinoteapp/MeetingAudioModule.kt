@@ -27,7 +27,7 @@ class MeetingAudioModule(private val context: ReactApplicationContext) : ReactCo
     } catch (e: Exception) { promise.reject("AUDIO_INFO", e.message, e) }
     finally { retriever.release() }
   } }
-  /** 只允许切分本模块生成的缓存；固定 120 秒上传块，不把长录音读入内存。 */
+  /** 只允许切分本模块生成的缓存；固定 60 秒上传块，与公网转写上限一致。 */
   @ReactMethod
   fun wavInfo(uri: String, promise: Promise) { worker.execute {
     try {
@@ -56,8 +56,8 @@ class MeetingAudioModule(private val context: ReactApplicationContext) : ReactCo
     try {
       require(index.isFinite() && index >= 0 && index == kotlin.math.floor(index)) { "分段索引无效" }
       val source = cachedWav(uri)
-      val offset = index.toLong() * 120L * 32000L
-      val length = minOf(120L * 32000L, source.length() - 44 - offset)
+      val offset = index.toLong() * 60L * 32000L
+      val length = minOf(60L * 32000L, source.length() - 44 - offset)
       require(length > 0) { "分段超出录音范围" }
       RandomAccessFile(source, "r").use { input ->
         val header = ByteArray(44); input.readFully(header)

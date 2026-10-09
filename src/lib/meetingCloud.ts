@@ -3,10 +3,11 @@ import { TransportError } from './errors'
 import { NativeModules } from 'react-native'
 import FS from 'react-native-fs'
 
-export type TranscriptionCheckpoint = { version: 1; model: string; duration: number; parts: string[] }
+export type TranscriptionCheckpoint = { version: 2; model: string; duration: number; parts: string[] }
 export type SummaryCheckpoint = { version: 5; model: string; title: string; source: string; parts: Record<string, string> }
 type Options<T> = { checkpoint?: T; progress: (text: string) => void; save: (checkpoint: T) => Promise<void>; guard: () => Promise<void> }
 const remove = (uri: string) => FS.unlink(uri.replace('file://', '')).catch(() => {})
+const ASR_CHUNK_SECONDS = 60
 
 async function retry<T>(operation: () => Promise<T>, guard: () => Promise<void>, progress: (text: string) => void): Promise<T> {
   for (let attempt = 0; ; attempt++) {
@@ -29,13 +30,13 @@ export async function transcribe(uri: string, model: string, options: Options<Tr
   try {
     const duration: number = await audio.wavInfo(wav)
     if (!Number.isFinite(duration) || duration <= 0) throw new Error('录音没有有效音频')
-    const total = Math.ceil(duration / 120)
+    const total = Math.ceil(duration / ASR_CHUNK_SECONDS)
     const cached = options.checkpoint
-    const checkpoint: TranscriptionCheckpoint = cached?.version === 1 && cached.model === model && cached.duration === duration && cached.parts.length <= total
-      ? { ...cached, parts: [...cached.parts] } : { version: 1, model, duration, parts: [] }
+    const checkpoint: TranscriptionCheckpoint = cached?.version === 2 && cached.model === model && cached.duration === duration && cached.parts.length <= total
+      ? { ...cached, parts: [...cached.parts] } : { version: 2, model, duration, parts: [] }
     for (let index = checkpoint.parts.length; index < total; index++) {
       await options.guard()
-      options.progress(`正在转写 ${index + 1}/${total} 段 · 已完成 ${Math.floor(Math.min(index * 120, duration) / duration * 100)}%`)
+      options.progress(`正在转写 ${index + 1}/${total} 段 · 已完成 ${Math.floor(Math.min(index * ASR_CHUNK_SECONDS, duration) / duration * 100)}%`)
       const chunk: string = await audio.wavChunk(wav, index)
       try {
         const result = await retry(async () => {
@@ -51,7 +52,7 @@ export async function transcribe(uri: string, model: string, options: Options<Tr
       } finally { await remove(chunk) }
     }
     if (!checkpoint.parts.some(part => part.trim())) throw new Error('未识别到有效语音，请检查录音后重试')
-    return checkpoint.parts.map((text, index) => `[录音第 ${index * 2} 分钟起]\n${text || '（本段未识别到语音）'}`).join('\n\n')
+    return checkpoint.parts.map((text, index) => `[录音第 ${index} 分钟起]\n${text || '（本段未识别到语音）'}`).join('\n\n')
   } finally { await remove(wav) }
 }
 
