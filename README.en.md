@@ -57,3 +57,7 @@ npm run test:scripts
 ```
 
 The parent repository pins this repository at `VINote-app/` as a Git submodule. Push app commits before updating the parent gitlink. Do not commit APKs, generated files, private audio, sessions or signing credentials. Icon sources are in `assets/branding`; `python scripts/generate-icons.py` requires Pillow.
+
+### Streaming meeting summaries
+
+Summary stages use the public OpenAI-compatible SSE API and native XMLHttpRequest incremental text, showing received character counts. Checkpoints require a complete terminal marker and a successful finish; interrupted or truncated output cannot become a note. Existing complete transcripts and successful fact checkpoints remain reusable. Each streaming request has a finite 15-minute total bound; service availability and background limits still apply. Timings include transcription wall time and time to first summary content (network and service waiting included). Streaming prevents prolonged response silence; it does not guarantee faster ASR or model generation.

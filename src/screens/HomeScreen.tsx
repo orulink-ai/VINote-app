@@ -7,6 +7,7 @@ import { listNotes } from '../lib/notes'
 import type { Note } from '../types/api'
 
 type Props = {
+  libraryRevision?: number
   onRecord: () => void
   onImport: () => void
   onRecordings: () => void
@@ -24,7 +25,7 @@ function SectionHeader({ title, onPress }: { title: string; onPress: () => void 
   </View>
 }
 
-export function HomeScreen({ onRecord, onImport, onRecordings, onNotes, onOpenNote, onSignOut }: Props) {
+export function HomeScreen({ libraryRevision = 0, onRecord, onImport, onRecordings, onNotes, onOpenNote, onSignOut }: Props) {
   const [recordings, setRecordings] = useState<LocalRecording[]>([])
   const [notes, setNotes] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
@@ -36,13 +37,13 @@ export function HomeScreen({ onRecord, onImport, onRecordings, onNotes, onOpenNo
     Promise.allSettled([listRecordings(), listNotes()]).then(([recordingsResult, notesResult]) => {
       if (!active) return
       if (recordingsResult.status === 'fulfilled') setRecordings(recordingsResult.value)
-      else setRecordingsError(true)
+      setRecordingsError(recordingsResult.status !== 'fulfilled')
       if (notesResult.status === 'fulfilled') setNotes(notesResult.value)
-      else setNotesError(true)
+      setNotesError(notesResult.status !== 'fulfilled')
       setLoading(false)
     })
     return () => { active = false }
-  }, [])
+  }, [libraryRevision])
 
   const latestRecording = recordings[0]
   const latestNote = notes[0]

@@ -13,6 +13,9 @@ jest.mock('../src/lib/models', () => ({ loadSelection: jest.fn(async () => ({ as
 
 beforeEach(() => {
   jest.clearAllMocks()
+  jest.mocked(loadModels).mockReset().mockResolvedValue([
+    { id: 'asr1', modelType: 'asr', runtimeStatus: 'available' }, { id: 'llm1', modelType: 'llm', runtimeStatus: 'available' },
+  ])
   jest.mocked(nextNoteVersion).mockResolvedValue(1)
   jest.mocked(getNote).mockRejectedValue(new ApiError('本机未找到这份纪要', 404))
 })
@@ -96,4 +99,15 @@ test('a saved note is linked on recovery without overwriting or regenerating it'
   expect(loadModels).not.toHaveBeenCalled()
   expect(createNote).not.toHaveBeenCalled()
   expect(saveRecording).toHaveBeenLastCalledWith(expect.objectContaining({ noteId: note.id, lastNoteVersion: 2, generation: undefined }))
+})
+
+test('model access failures retain only diagnostic status, code and request id and preserve the transcript', async () => {
+  jest.mocked(summarize).mockRejectedValueOnce(new ApiError('模型暂不可用', 403, { code: 'AccessDenied.Unpurchased', requestId: 'request-123' }))
+  const record = { id: 'model-denied', uri: 'file:///original.m4a', title: '会议', createdAt: '', duration: 600,
+    transcript: '完整转写', asrModel: 'asr1' }
+  await expect(generateRecording(record, jest.fn())).rejects.toThrow('模型暂不可用')
+  expect(transcribe).not.toHaveBeenCalled()
+  expect(createNote).not.toHaveBeenCalled()
+  expect(saveRecording).toHaveBeenLastCalledWith(expect.objectContaining({ transcript: '完整转写', errorDetails:
+    { status: 403, code: 'AccessDenied.Unpurchased', requestId: 'request-123' }, generation: expect.objectContaining({ status: 'paused' }) }))
 })

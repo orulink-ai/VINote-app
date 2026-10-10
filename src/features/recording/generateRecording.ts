@@ -30,7 +30,7 @@ export async function generateRecording(record: LocalRecording, progress: (text:
         await guard()
         await saveRecording({ ...record, noteId: savedNote.id,
           lastNoteVersion: Math.max(record.lastNoteVersion || 0, record.generation.version),
-          generation: undefined, error: undefined })
+          generation: undefined, error: undefined, errorDetails: undefined })
         return savedNote.id
       }
     }
@@ -42,7 +42,7 @@ export async function generateRecording(record: LocalRecording, progress: (text:
       if (!models.some(m => m.id === selection[`${kind}_model`] && m.modelType === kind && m.runtimeStatus === 'available')) throw new Error('所选模型不可用，请重新选择云端模型')
     }
     const version = record.generation?.version || Math.max((record.lastNoteVersion || 0) + 1, await nextNoteVersion(record.id))
-    current = { ...record, taskId: undefined, error: undefined, processingTimings: timings, summaryCheckpoint: record.generation ? record.summaryCheckpoint : undefined,
+    current = { ...record, taskId: undefined, error: undefined, errorDetails: undefined, processingTimings: timings, summaryCheckpoint: record.generation ? record.summaryCheckpoint : undefined,
       generation: { status: 'pending', asrModel: selection.asr_model, llmModel: selection.llm_model,
         startedAt: record.generation?.startedAt || new Date().toISOString(), version } }
     await saveRecording(current)
@@ -85,7 +85,8 @@ export async function generateRecording(record: LocalRecording, progress: (text:
     const transient = error instanceof TransportError || (error instanceof ApiError && [429, 502, 503, 504].includes(error.status))
     if (await readAccountId() === owner) await saveRecording({ ...current,
       generation: current.generation && { ...current.generation, status: transient ? 'pending' : 'paused' },
-      error: error instanceof Error ? error.message : '处理失败' })
+      error: error instanceof Error ? error.message : '处理失败',
+      errorDetails: error instanceof ApiError ? { status: error.status, ...error.details } : undefined })
     throw error
   } finally {
     if (backgroundStarted) await NativeModules.MeetingProcessing.stop().catch(() => {})

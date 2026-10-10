@@ -8,7 +8,7 @@ import type { ProcessingTiming } from '../../lib/processingHelpers'
 import { listNotes } from '../../lib/notes'
 import { acquireRecordingLock } from './recordingProcessing'
 
-export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; lastNoteVersion?: number; error?: string; processingTimings?: ProcessingTiming[]; transcriptionCheckpoint?: TranscriptionCheckpoint; summaryCheckpoint?: SummaryCheckpoint; generation?: { status: 'pending' | 'paused'; asrModel: string; llmModel: string; startedAt: string; version?: number } }
+export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; lastNoteVersion?: number; error?: string; errorDetails?: { status: number; code?: string; requestId?: string }; processingTimings?: ProcessingTiming[]; transcriptionCheckpoint?: TranscriptionCheckpoint; summaryCheckpoint?: SummaryCheckpoint; generation?: { status: 'pending' | 'paused'; asrModel: string; llmModel: string; startedAt: string; version?: number } }
 export async function accountDirectory() {
   const account = await readAccountId()
   if (!account) throw new Error('请联网登录一次，以确认本机录音所属账号')
@@ -66,8 +66,17 @@ export async function listRecordings(): Promise<LocalRecording[]> {
   return results.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 export async function exportRecording(record: LocalRecording) {
+  const owner = await readAccountId()
   const directory = await accountDirectory()
-  if (record.uri.replace('file://', '') !== `${directory}/${record.id}.${extension(record)}`) throw new Error('录音不属于当前账号')
+  if (!owner || directory !== `${FS.DocumentDirectoryPath}/recordings/accounts/${encodeURIComponent(owner)}`) throw new Error('账号已切换，请重新导出')
+  const path = record.uri.replace('file://', '')
+  if (!/^[a-zA-Z0-9-]+$/.test(record.id) || path !== `${directory}/${record.id}.${extension(record)}`) throw new Error('录音不属于当前账号')
+  if (!await FS.exists(path)) throw new Error('未找到有效录音文件，原始记录已保留')
+  const file = await FS.stat(path)
+  if (!file.isFile() || !Number.isFinite(Number(file.size)) || Number(file.size) <= 0) throw new Error('未找到有效录音文件，原始记录已保留')
+  if (await readAccountId() !== owner) throw new Error('账号已切换，请重新导出')
+  // Android FileProvider only grants the chosen file; share the original directly so
+  // long recordings need neither a second copy nor cleanup before the receiver reads it.
   await Share.open({ url: record.uri, type: ({ mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', aac: 'audio/aac', ogg: 'audio/ogg' } as Record<string, string>)[extension(record)] || 'audio/mp4', title: record.title, failOnCancel: false, saveToFiles: true })
 }
 export async function deleteRecording(record: LocalRecording) {
