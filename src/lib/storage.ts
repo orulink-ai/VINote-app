@@ -7,7 +7,9 @@ export type Session = { access_token: string; refresh_token: string; user: { id:
 let revision = 0
 // 按调用顺序提交凭证变更，防止刷新写入晚于退出而恢复旧会话。
 // Remove credentials issued by the previous Supabase project without touching recordings.
-let mutations: Promise<unknown> = Keychain.resetGenericPassword({ service: LEGACY_SERVICE }).catch(() => {})
+let mutations: Promise<unknown> = Promise.resolve()
+  .then(() => Keychain.resetGenericPassword({ service: LEGACY_SERVICE }))
+  .catch(() => {})
 function mutate(action: () => Promise<unknown>) {
   revision += 1
   const next = mutations.then(action)

@@ -23,7 +23,9 @@ export async function timedFetch(url: string, init: RequestInit, timeout = 60000
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeout)
   try { return await fetch(url, { ...init, signal: controller.signal, credentials: 'omit' }) }
-  catch {
+  catch (error) {
+    if (__DEV__) console.warn('[VINote] network request failed', new URL(url).host,
+      error instanceof Error ? `${error.name}: ${error.message}` : String(error))
     throw new TransportError(url.includes('/auth/v1/')
       ? '账号服务连接失败，请确认当前 Wi-Fi 的账号网络通道可用后重试。'
       : '会议服务连接失败或请求超时，请稍后重试。原始录音仍保留在本机。')

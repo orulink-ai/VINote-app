@@ -1,4 +1,9 @@
 /* global jest */
+jest.mock('react-native-keychain', () => ({
+  setGenericPassword: jest.fn(async () => false),
+  resetGenericPassword: jest.fn(async () => true),
+  getGenericPassword: jest.fn(async () => false),
+}));
 
 jest.mock('react-native-fs', () => ({ DocumentDirectoryPath: '/documents', CachesDirectoryPath: '/cache', stat: jest.fn(), readFile: jest.fn(), copyFile: jest.fn(), unlink: jest.fn(async () => {}), mkdir: jest.fn(), writeFile: jest.fn(), moveFile: jest.fn(), exists: jest.fn(async () => false), readDir: jest.fn(async () => []) }));
 jest.mock('react-native-share', () => ({ open: jest.fn() }));
