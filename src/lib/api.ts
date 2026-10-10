@@ -3,8 +3,9 @@ import { Platform } from 'react-native'
 import { accessToken } from './supabase'
 import { ApiError, decodeResponse, timedFetch } from './errors'
 import { readSession } from './storage'
+import { requestTextStream } from './textStream'
 export { ApiError } from './errors'
-export async function apiFetch(path: string, init: RequestInit = {}, expectedAccountId?: string) {
+async function authorize(init: RequestInit, expectedAccountId?: string) {
   const session = await readSession()
   if (!session) throw new ApiError('请重新登录账号', 401)
   const account = session.user.id
@@ -15,6 +16,10 @@ export async function apiFetch(path: string, init: RequestInit = {}, expectedAcc
   headers.set('X-VILab-Client-Id', `vinote-app-${Platform.OS}`)
   if (typeof init.body === 'string') headers.set('Content-Type', 'application/json')
   headers.set('Authorization', `Bearer ${session.access_token}`)
+  return { account, headers }
+}
+export async function apiFetch(path: string, init: RequestInit = {}, expectedAccountId?: string) {
+  const { account, headers } = await authorize(init, expectedAccountId)
   let response = await timedFetch(`${API_BASE_URL}${path}`, { ...init, headers }, 360000)
   if (response.status === 401) {
     headers.set('Authorization', `Bearer ${await accessToken(true, account)}`)
@@ -24,4 +29,18 @@ export async function apiFetch(path: string, init: RequestInit = {}, expectedAcc
 }
 export async function apiJson<T>(path: string, init: RequestInit = {}, expectedAccountId?: string) {
   return decodeResponse<T>(await apiFetch(path, init, expectedAccountId))
+}
+export async function apiTextStream(path: string, init: RequestInit, receive: (text: string) => void, expectedAccountId?: string) {
+  const { account, headers } = await authorize(init, expectedAccountId)
+  headers.set('Accept', 'text/event-stream')
+  let response = await requestTextStream(`${API_BASE_URL}${path}`, { ...init, headers }, receive)
+  if (response.status === 401) {
+    headers.set('Authorization', `Bearer ${await accessToken(true, account)}`)
+    response = await requestTextStream(`${API_BASE_URL}${path}`, { ...init, headers }, receive)
+  }
+  if (response.status < 200 || response.status >= 300) {
+    await decodeResponse({ status: response.status, ok: false, headers: new Headers(response.requestId ? { 'x-request-id': response.requestId } : {}),
+      text: async () => response.text } as Response)
+  }
+  if (!response.contentType.toLowerCase().startsWith('text/event-stream')) throw new Error('总结服务未返回流式响应，请检查服务配置；转写已保存')
 }

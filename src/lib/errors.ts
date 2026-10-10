@@ -1,5 +1,5 @@
 export class ApiError extends Error {
-  constructor(message: string, public status: number) { super(message) }
+  constructor(message: string, public status: number, public details?: { code?: string; requestId?: string }) { super(message) }
 }
 export class TransportError extends Error {}
 export async function decodeResponse<T>(response: Response): Promise<T> {
@@ -8,7 +8,10 @@ export async function decodeResponse<T>(response: Response): Promise<T> {
   try { data = text ? JSON.parse(text) : null } catch { data = null }
   if (!response.ok) {
     const message = data?.error?.message || data?.msg || data?.error_description || data?.message || data?.detail
-    throw new ApiError(typeof message === 'string' ? message : `服务请求失败（HTTP ${response.status}）`, response.status)
+    const code = data?.error?.code || data?.code
+    const requestId = response.headers?.get('x-request-id') || undefined
+    throw new ApiError(typeof message === 'string' ? message : `服务请求失败（HTTP ${response.status}）`, response.status,
+      { ...(typeof code === 'string' ? { code: code.slice(0, 120) } : {}), ...(requestId ? { requestId: requestId.slice(0, 120) } : {}) })
   }
   return data as T
 }

@@ -27,3 +27,21 @@ test('home offers direct capture and import, and opens recent content', async ()
   expect(onOpenNote).toHaveBeenCalledWith('n1')
   await act(async () => view.unmount())
 })
+
+test('background completion refreshes recent recordings and notes on the open home screen', async () => {
+  const record = { id: 'r1', title: '产品周会', uri: 'file:///r1.m4a', createdAt: '2026-10-09T08:00:00Z', duration: 90 }
+  jest.mocked(listRecordings).mockResolvedValue([{ ...record, error: '转写失败' }])
+  jest.mocked(listNotes).mockResolvedValue([])
+  const props = { onRecord: jest.fn(), onImport: jest.fn(), onRecordings: jest.fn(), onNotes: jest.fn(), onOpenNote: jest.fn(), onSignOut: jest.fn() }
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<HomeScreen {...props} libraryRevision={0} />) })
+  expect(JSON.stringify(view.toJSON())).toContain('需要检查')
+  jest.mocked(listRecordings).mockResolvedValue([{ ...record, noteId: 'n1' }])
+  jest.mocked(listNotes).mockResolvedValue([{ id: 'n1', title: '周会纪要', content: '', status: 'done', created_at: '2026-10-09T08:30:00Z', updated_at: '2026-10-09T08:30:00Z' }])
+  await act(async () => { view.update(<HomeScreen {...props} libraryRevision={1} />) })
+  expect(JSON.stringify(view.toJSON())).not.toContain('需要检查')
+  const open = view.root.findAll(node => node.props.accessibilityLabel === '打开纪要：周会纪要' && typeof node.props.onPress === 'function')[0]
+  await act(async () => { open.props.onPress() })
+  expect(props.onOpenNote).toHaveBeenCalledWith('n1')
+  await act(async () => view.unmount())
+})

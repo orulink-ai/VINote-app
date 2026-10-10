@@ -1,5 +1,5 @@
-import { apiJson } from './api'
-import { retry, mapConcurrent, createSerialQueue } from './processingHelpers'
+import { chatCompletion } from './chatCompletion'
+import { retry, mapConcurrent, createSerialQueue, measure } from './processingHelpers'
 
 // Increment when changing extraction, drafting, or review prompts. Old results
 // must never be mixed with material produced under a different prompt policy.
@@ -73,12 +73,22 @@ export async function summarize(transcript: string, title: string, model: string
     const prior = checkpoint.parts[key]
     if (prior) return prior
     const started = Date.now()
-    const result = await retry(() => apiJson<{ choices: { finish_reason?: string; message: { content: string } }[] }>('/openai/v1/chat/completions', {
-      method: 'POST', body: JSON.stringify({ model, stream: false, messages: [
+    let firstContent = true
+    let lastProgress = 0
+    const result = await measure(stage, () => retry(() => chatCompletion(model, [
         { role: 'system', content: `${instruction} ${sharedRules}` },
         { role: 'user', content: input },
-      ] }),
-    }, options.owner), options.guard, options.progress)
+      ], options.owner, characters => {
+        const now = Date.now()
+        if (firstContent) {
+          firstContent = false
+          options.timing?.({ stage: `${stage}-first-content`, durationMs: now - started, ...(index === undefined ? {} : { index }) })
+        }
+        if (now - lastProgress < 1000) return
+        lastProgress = now
+        const label = stage === 'audit' ? '正在核查纪要' : stage === 'draft' ? '正在生成会议纪要' : stage === 'facts' ? `正在提取第 ${(index ?? 0) + 1} 部分事实` : '正在合并会议事实'
+        options.progress(`${label} · 已接收 ${characters} 字…`)
+      }), options.guard, options.progress), options.timing, index)
     const choice = result?.choices?.[0]
     const content = choice?.message?.content
     if (choice?.finish_reason === 'length') throw new Error('模型输出被截断，请更换总结模型后重试；转写已保存')
@@ -88,7 +98,6 @@ export async function summarize(transcript: string, title: string, model: string
       checkpoint.parts[key] = content
       await options.save({ ...checkpoint, parts: { ...checkpoint.parts } })
     })
-    options.timing?.({ stage, durationMs: Date.now() - started, ...(index === undefined ? {} : { index }) })
     return content
   }
 

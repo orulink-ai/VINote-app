@@ -22,6 +22,7 @@ export default function App() {
   const [noteId, setNoteId] = useState<string | null>(null)
   const [generateId, setGenerateId] = useState<string | null>(null)
   const [importOnOpen, setImportOnOpen] = useState(false)
+  const [libraryRevision, setLibraryRevision] = useState(0)
   useEffect(() => {
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
       if (!authenticated || screen === 'home' || screen === 'record' || screen === 'recordings') return false
@@ -41,10 +42,15 @@ export default function App() {
   }, [])
   useEffect(() => {
     if (!authenticated) return
-    const resume = () => { void resumePendingRecordings(() => {}).catch(() => {}) }
+    let active = true
+    const resume = () => {
+      void resumePendingRecordings(() => {}).catch(() => {}).finally(() => {
+        if (active) setLibraryRevision(revision => revision + 1)
+      })
+    }
     resume()
     const subscription = AppState.addEventListener('change', state => { if (state === 'active') resume() })
-    return () => subscription.remove()
+    return () => { active = false; subscription.remove() }
   }, [authenticated])
   if (authenticated === null) return <SafeAreaProvider><View style={styles.loading}><ActivityIndicator color={colors.primary} /></View></SafeAreaProvider>
   const openRecordings = (importAudio = false, recordingId?: string) => {
@@ -60,6 +66,7 @@ export default function App() {
   let content: React.ReactNode
   if (!authenticated) content = <LoginScreen onAuthenticated={() => setAuthenticated(true)} />
   else if (screen === 'home') content = <HomeScreen
+    libraryRevision={libraryRevision}
     onRecord={() => setScreen('record')}
     onImport={() => openRecordings(true)}
     onRecordings={() => openRecordings()}

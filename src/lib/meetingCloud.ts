@@ -17,6 +17,10 @@ const renderTranscript = (parts: Array<string | null>) => parts.map((text, index
   `[录音第 ${index} 分钟起]\n${text || '（本段未识别到语音）'}`).join('\n\n')
 
 export async function transcribe(uri: string, model: string, options: ProcessingOptions<TranscriptionCheckpoint>) {
+  return measure('transcription', () => transcribeAudio(uri, model, options), options.timing)
+}
+
+async function transcribeAudio(uri: string, model: string, options: ProcessingOptions<TranscriptionCheckpoint>) {
   const audio = NativeModules.MeetingAudio
   if (!audio?.wavChunk) throw new Error('当前平台尚未提供分段音频转换，请安装包含原生音频模块的新版 App')
   await options.guard()
@@ -86,6 +90,12 @@ export async function transcribe(uri: string, model: string, options: Processing
         if (typeof result?.text !== 'string') throw new Error('转写服务返回格式异常，此分段未保存，请重试')
         checkpoint.parts[index] = result.text.trim()
         await save()
+        const saved = checkpoint.parts.filter(part => part !== null).length
+        const seconds = checkpoint.parts.reduce((sum: number, part, position) => sum +
+          (part === null ? 0 : Math.min(60, duration - position * 60)), 0)
+        if (saved < total || checkpoint.parts.some(part => part?.trim())) {
+          options.progress(`转写已保存 ${saved}/${total} 段 · ${Math.floor(seconds)}/${Math.floor(duration)} 秒 · ${Math.floor(seconds / duration * 100)}%`)
+        }
       } finally { if (chunk !== wav && chunk !== uri) await remove(chunk) }
     })
     if (!checkpoint.parts.some(part => part?.trim())) throw new Error('未识别到有效语音，请检查录音后重试')

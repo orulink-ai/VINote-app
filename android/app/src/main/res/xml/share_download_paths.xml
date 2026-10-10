@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Keep react-native-share's existing cache/download roots for note exports. -->
+    <external-path name="rnshare1" path="Download/" />
+    <cache-path name="rnshare2" path="/" />
+    <!-- Only selected recording files receive temporary URI read grants. -->
+    <files-path name="recording_audio" path="recordings/accounts/" />
+</paths>
