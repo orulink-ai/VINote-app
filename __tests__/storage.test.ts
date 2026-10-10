@@ -1,7 +1,10 @@
 import * as Keychain from 'react-native-keychain'
 import { clearToken, readSession, saveSession, sessionRevision } from '../src/lib/storage'
 jest.mock('react-native-keychain', () => ({ setGenericPassword: jest.fn(), resetGenericPassword: jest.fn(), getGenericPassword: jest.fn() }))
-beforeEach(() => jest.clearAllMocks())
+beforeEach(async () => {
+  await readSession()
+  jest.clearAllMocks()
+})
 
 test('logout is applied after an in-flight credential write and invalidates refresh immediately', async () => {
   let finish!: () => void
@@ -15,7 +18,9 @@ test('logout is applied after an in-flight credential write and invalidates refr
   expect(Keychain.resetGenericPassword).not.toHaveBeenCalled()
   finish()
   await Promise.all([saving, clearing])
-  expect(Keychain.resetGenericPassword).toHaveBeenCalledTimes(1)
+  expect(Keychain.resetGenericPassword).toHaveBeenCalledTimes(2)
+  expect(Keychain.resetGenericPassword).toHaveBeenCalledWith({ service: 'com.vinote.app.supabase.vinote.session' })
+  expect(Keychain.resetGenericPassword).toHaveBeenCalledWith({ service: 'com.vinote.app.supabase.session' })
 })
 
 test('a failed mutation does not block later logout or reads', async () => {

@@ -1,7 +1,7 @@
 {
   "channel": "public",
   "apiBaseUrl": "https://api.orulink.ai",
-  "authBaseUrl": "https://jzwidvczdjbkontidwpy.supabase.co",
+  "authBaseUrl": "https://supabase-vinote.orulink.ai",
   "accountProxyHost": "",
   "accountProxyPort": 7890
 }

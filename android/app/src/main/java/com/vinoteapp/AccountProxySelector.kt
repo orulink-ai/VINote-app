@@ -12,9 +12,9 @@ class AccountProxySelector(
   private val systemSelector: ProxySelector? = ProxySelector.getDefault(),
 ) : ProxySelector() {
   override fun select(uri: URI): List<Proxy> =
-    if (BuildConfig.ACCOUNT_PROXY_HOST.isNotEmpty() && uri.scheme == "https" && uri.host == "jzwidvczdjbkontidwpy.supabase.co") {
+    if (BuildConfig.ACCOUNT_PROXY_HOST.isNotEmpty() && uri.scheme == "https" && uri.host == "supabase-vinote.orulink.ai") {
       listOf(Proxy(Proxy.Type.HTTP, InetSocketAddress(BuildConfig.ACCOUNT_PROXY_HOST, BuildConfig.ACCOUNT_PROXY_PORT)))
-    } else if (uri.scheme == "https" && uri.host == "jzwidvczdjbkontidwpy.supabase.co") {
+    } else if (uri.scheme == "https" && uri.host == "supabase-vinote.orulink.ai") {
       systemSelector?.select(uri)?.takeIf { it.isNotEmpty() } ?: listOf(Proxy.NO_PROXY)
     } else {
       listOf(Proxy.NO_PROXY)

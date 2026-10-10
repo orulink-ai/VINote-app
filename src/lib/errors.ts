@@ -7,8 +7,12 @@ export async function decodeResponse<T>(response: Response): Promise<T> {
   let data: any
   try { data = text ? JSON.parse(text) : null } catch { data = null }
   if (!response.ok) {
-    const message = data?.error?.message || data?.msg || data?.error_description || data?.message || data?.detail
-    const code = data?.error?.code || data?.code
+    const code = data?.error?.code || data?.error_code || data?.code
+    const message = code === 'signup_disabled'
+      ? '新账号注册尚未开放，请联系管理员。'
+      : code === 'weak_password'
+        ? '密码不符合账号安全要求，请使用至少 6 位且更复杂的密码。'
+      : data?.error?.message || data?.msg || data?.error_description || data?.message || data?.detail
     const requestId = response.headers?.get('x-request-id') || undefined
     throw new ApiError(typeof message === 'string' ? message : `服务请求失败（HTTP ${response.status}）`, response.status,
       { ...(typeof code === 'string' ? { code: code.slice(0, 120) } : {}), ...(requestId ? { requestId: requestId.slice(0, 120) } : {}) })
@@ -19,7 +23,9 @@ export async function timedFetch(url: string, init: RequestInit, timeout = 60000
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeout)
   try { return await fetch(url, { ...init, signal: controller.signal, credentials: 'omit' }) }
-  catch {
+  catch (error) {
+    if (__DEV__) console.warn('[VINote] network request failed', new URL(url).host,
+      error instanceof Error ? `${error.name}: ${error.message}` : String(error))
     throw new TransportError(url.includes('/auth/v1/')
       ? '账号服务连接失败，请确认当前 Wi-Fi 的账号网络通道可用后重试。'
       : '会议服务连接失败或请求超时，请稍后重试。原始录音仍保留在本机。')
