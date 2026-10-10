@@ -19,7 +19,7 @@ React Native Community CLI 原生应用，使用统一的 React Native 原生组
 
 ## 网络与平台边界
 
-测试包内置 VILab `http://192.168.1.143:9876`，正式包内置 `https://api.orulink.ai`；账号均使用同一 HTTPS Supabase 项目。Android 测试包对账号域名使用 `192.168.1.101:7890` CONNECT 出口，正式包不内置内网代理，账号请求遵循系统网络代理设置；iOS 不包含该代理适配。构建命令自动选择部署配置。部分网络直连 Supabase 会失败，登录与令牌刷新需要可达网络或系统代理；本版尚未提供公网账号转发入口。
+测试包内置 VILab `http://192.168.1.143:9876`，正式包内置 `https://api.orulink.ai`；账号统一使用 `https://supabase-vinote.orulink.ai`。Android 和 iOS 的账号请求遵循系统网络设置，构建命令自动选择部署配置。旧账号需在新项目重新注册，旧数据暂留旧项目。
 
 ASR 明确返回 Aliyun 或 Volcengine 空转写错误时，保留为空分段并继续后续音频；全部分段都为空时仍报告未识别到有效语音，其他服务故障沿用重试与失败处理。
 
