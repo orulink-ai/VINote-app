@@ -1,18 +1,17 @@
-import Storage from '@react-native-async-storage/async-storage'
-import FS from 'react-native-fs'
-import { generationBaseUrl, integrationJson, operationId, verifyContentService } from './integration'
 import { ApiError } from './errors'
+import Storage from '@react-native-async-storage/async-storage'
+import { generationBaseUrl, integrationJson } from './integration'
 import { readAccountId } from './storage'
 import { saveSourceNote } from './notes'
 import type { LocalFile } from './localFiles'
 import type { LocalRecording } from '../features/recording/recordingLibrary'
 import { advanceLocalFileAssociation, beginLocalFileAssociation, markLocalFileDispatch, readLocalFileAssociation } from './localFileAssociations'
-import { isBilibiliUrl, isExplicitVideoUrl, isVideoUrlAllowed, videoUrlUnavailableMessage } from './intakeCapabilities'
-import { loadModels, loadSelection, type ModelSelection } from './models'
-import { modelEligible } from './modelEligibility'
+import { isExplicitVideoUrl } from './intakeCapabilities'
+import { type ModelSelection } from './models'
+import { prepareClientNote, recoverPreparedClientNote, startClientNote, readClientNote } from './clientNotePipeline'
 
 export type IntakeFile = LocalFile | LocalRecording
-export type IntakeDraft = { modelSelection?: ModelSelection; retryUncertain?: boolean; modelConfirmationRequired?: boolean; mode: 'url' | 'file'; url: string; file?: IntakeFile; taskId?: string; sourceType?: string; uncertain?: boolean; operationId?: string; receiptState?: 'unknown' | 'reserved' | 'accepted'; recoverySupported?: boolean; generationOrigin?: string; submittedAt?: string }
+export type IntakeDraft = { execution?: 'client'; modelOrigin?: string; modelSelection?: ModelSelection; retryUncertain?: boolean; modelConfirmationRequired?: boolean; mode: 'url' | 'file'; url: string; file?: IntakeFile; taskId?: string; sourceType?: string; uncertain?: boolean; operationId?: string; receiptState?: 'unknown' | 'reserved' | 'accepted'; recoverySupported?: boolean; generationOrigin?: string; submittedAt?: string }
 type SourceReceipt = { operation_id: string; task_id: string; state: 'reserved' | 'accepted'; status: string; source_type?: string }
 export type IntakeStatus = { status: string; message?: string; progress?: number | null; retryable?: boolean; result?: { title: string; markdown: string } }
 const key = (owner: string) => `vinote:${owner}:note-intake`
@@ -24,12 +23,42 @@ export async function readIntake(owner: string): Promise<IntakeDraft> {
   await guard(owner)
   return JSON.parse(await Storage.getItem(key(owner)) || '{"mode":"url","url":""}')
 }
-export async function writeIntake(owner: string, draft: IntakeDraft) {
+async function writeSlot(owner: string, draft: IntakeDraft) {
   await guard(owner)
   if (draft.operationId) await Storage.setItem(`vinote:${owner}:source-request:${draft.operationId}`, JSON.stringify(draft))
   await guard(owner)
   await Storage.setItem(key(owner), JSON.stringify(draft))
   await guard(owner)
+}
+const slotMutations = new Map<string, Promise<unknown>>()
+async function mutateSlot<T>(owner: string, action: () => Promise<T>): Promise<T> {
+  const work = (slotMutations.get(owner) || Promise.resolve()).catch(() => {}).then(action)
+  slotMutations.set(owner, work)
+  try { return await work } finally { if (slotMutations.get(owner) === work) slotMutations.delete(owner) }
+}
+export async function writeIntake(owner: string, draft: IntakeDraft) {
+  return mutateSlot(owner, () => writeSlot(owner, draft))
+}
+function selectionKey(draft: IntakeDraft) {
+  const file = draft.file
+  return JSON.stringify({ operation: draft.operationId, task: draft.taskId, execution: draft.execution,
+    origin: draft.modelOrigin, extraction: draft.generationOrigin, mode: draft.mode, url: draft.url,
+    models: draft.modelSelection,
+    file: file ? { id: file.id, uri: file.uri, extension: file.extension, size: 'size' in file ? file.size : undefined,
+      source: 'bilibiliSource' in file ? file.bilibiliSource : undefined } : undefined })
+}
+export async function leaveClientIntake(owner: string, expected: IntakeDraft) {
+  return mutateSlot(owner, async () => {
+    const stored = await readIntake(owner)
+    if (expected.execution !== 'client' || !expected.operationId || selectionKey(stored) !== selectionKey(expected)) throw new Error('当前来源已变化，未清除新的输入')
+    const record = await readClientNote(owner, expected)
+    if (selectionKey(record.draft) !== selectionKey(expected)) throw new Error('原来源身份已变化，未清除当前输入')
+    if (!['unknown', 'failed', 'success'].includes(record.status)) throw new Error('原处理仍在进行，请先读取原状态')
+    // Archive only the exact selection. The independent client record, result,
+    // source associations and inference markers are never changed by this action.
+    await writeSlot(owner, stored)
+    await writeSlot(owner, { mode: 'url', url: '' })
+  })
 }
 export async function leaveReservedIntake(owner: string, expected: IntakeDraft) {
   const stored = await readIntake(owner)
@@ -52,7 +81,7 @@ export function intakeUrl(value: string) {
   if (!match) throw new Error('请粘贴完整的 http 或 https 网页或视频链接')
   const url = new URL(match[0])
   if (url.username || url.password) throw new Error('链接不能包含账号密码')
-  return url.href
+  return url.href.replace(/#.*$/, '')
 }
 const submissions = new Map<string, Promise<IntakeDraft>>()
 export async function submitIntake(owner: string, draft: IntakeDraft): Promise<IntakeDraft> {
@@ -71,87 +100,45 @@ async function submitSource(owner: string, draft: IntakeDraft): Promise<IntakeDr
   assertIntakeOrigin(draft)
   if (draft.taskId && draft.receiptState !== 'reserved') return draft
   if (draft.operationId || draft.uncertain) return recoverIntake(owner, draft)
-  if (!generationBaseUrl) throw new Error('当前内容处理服务尚未配置；原文件保留在此设备')
-  const service = await verifyContentService(owner)
-  await guard(owner)
-  let body: string | FormData, path: string, sourceType: string
   if (draft.mode === 'url') {
-    const url = intakeUrl(draft.url)
-    if (isExplicitVideoUrl(url) && !isVideoUrlAllowed(url, service)) throw new Error(videoUrlUnavailableMessage(service))
-    if (service.video_source_preflight === 1 && isBilibiliUrl(url)) {
-      // Read-only source validation: no operation identity or generation work.
-      await integrationJson('/api/content-service/video-source', { method: 'POST', body: JSON.stringify({ url }) }, owner, 60000)
-      await guard(owner)
-    }
-    body = JSON.stringify({ video_url: url, platform: 'auto', workflow: 'note_organization', style: 'detailed', summary_mode: 'default', output_language: 'zh-CN' })
-    path = '/api/generate'; sourceType = 'video'
+    draft = { ...draft, url: intakeUrl(draft.url), sourceType: 'file' }
+    if (isExplicitVideoUrl(draft.url)) throw new Error('视频请先在设备保存音频或导入原文件，再生成笔记；不会由公网服务请求模型')
   } else {
     if (!draft.file) throw new Error('请先选择文件')
-    sourceType = intakeSourceType(draft.file)
-    const file = draft.file, extension = file.extension || 'm4a'
-    if ('bilibiliSource' in file && file.bilibiliSource) {
-      const sourceOperation = file.bilibiliSource.operationId
-      if (sourceOperation !== file.id || !/^[a-f0-9-]{36}$/.test(sourceOperation)) throw new Error('原下载操作无法核验，未重新提交')
+    draft = { ...draft, sourceType: 'bilibiliSource' in draft.file && draft.file.bilibiliSource ? 'video' : intakeSourceType(draft.file) }
+    const sourceOperation = 'bilibiliSource' in draft.file! ? draft.file!.bilibiliSource?.operationId : undefined
+    if (sourceOperation) {
+      if (sourceOperation !== draft.file!.id || !/^[a-f0-9-]{36}$/i.test(sourceOperation)) throw new Error('原下载操作与文件身份不一致，未重新提交')
       const previous = await readLocalFileAssociation(owner, sourceOperation)
       if (previous) {
-        if (previous.localFileId !== file.id || previous.generationOrigin !== generationBaseUrl) throw new Error('原下载已绑定另一任务或服务，未重新提交')
-        return recoverIntake(owner, { ...draft, operationId: sourceOperation, generationOrigin: previous.generationOrigin, taskId: previous.taskId, uncertain: true })
+        const raw = await Storage.getItem(`vinote:${owner}:source-request:${sourceOperation}`)
+        await guard(owner)
+        if (!raw && previous.execution === 'client' && previous.state === 'prepared' && previous.localFileId === draft.file!.id && previous.modelOrigin && previous.generationOrigin === generationBaseUrl) {
+          const prepared = await recoverPreparedClientNote(owner, draft, sourceOperation)
+          return acceptClientSource(owner, prepared)
+        }
+        if (!raw) throw new Error('原来源已有处理关联，请保留原操作核验；不会创建另一任务')
+        return recoverIntake(owner, JSON.parse(raw))
       }
     }
-    const folder = 'name' in file ? 'files' : 'recordings'
-    const expected = `file://${FS.DocumentDirectoryPath}/${folder}/accounts/${encodeURIComponent(owner)}/${file.id}.${extension}`
-    if (!/^[a-zA-Z0-9-]+$/.test(file.id) || file.uri !== expected) throw new Error('文件不属于当前账号，请重新选择')
-    const stat = await FS.stat(file.uri.replace('file://', ''))
-    const limit = Math.min(service.max_upload_bytes, sourceType === 'document' ? 20 * 1024 * 1024 : Infinity)
-    if (!Number.isFinite(Number(stat.size)) || Number(stat.size) <= 0) throw new Error('请选择非空文件')
-    if (Number(stat.size) > limit) throw new Error(`当前文件超过服务上限（${Math.floor(limit / 1024 / 1024)} MB），请另选文件；原文件保留在文件库。`)
-    const form = new FormData()
-    form.append('file', { uri: draft.file.uri, name: intakeFileName(draft.file), type: sourceType === 'document' ? (extension === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') : sourceType === 'transcript' ? 'text/plain' : sourceType === 'video' ? 'video/mp4' : 'audio/mp4' } as unknown as Blob)
-    form.append('source_type', sourceType); form.append('title', intakeFileName(draft.file))
-    form.append('style', 'detailed'); form.append('workflow', 'note_organization')
-    form.append('summary_mode', 'default'); form.append('output_language', 'zh-CN')
-    body = form; path = '/api/generate_from_upload'
   }
-  // Only a new submission reaches this point. Never replace a durable operation's models.
-  const selected = await loadSelection()
-  const selection: ModelSelection = { asr_model: selected.asr_model, llm_model: selected.llm_model }
-  await guard(owner)
-  const models = await loadModels(true)
-  await guard(owner)
-  const needsAsr = draft.mode === 'url' ? isExplicitVideoUrl(intakeUrl(draft.url)) : ['audio', 'video'].includes(sourceType)
-  for (const kind of (needsAsr ? ['llm', 'asr'] : ['llm']) as ('llm' | 'asr')[]) {
-    if (!selection[`${kind}_model`] || !models.some(m => m.id === selection[`${kind}_model`] && m.modelType === kind && modelEligible(m))) throw new Error('所选模型暂不可用，原选择已保留，请刷新状态后重试')
-  }
-  const modelOptions = { model_name: selection.llm_model, ...(needsAsr ? { asr_model: selection.asr_model } : {}) }
-  if (typeof body === 'string') body = JSON.stringify({ ...JSON.parse(body), ...modelOptions })
-  else for (const [name, value] of Object.entries(modelOptions)) body.append(name, value)
-  const sourceOperation = draft.mode === 'file' && draft.file && 'bilibiliSource' in draft.file ? draft.file.bilibiliSource?.operationId : undefined
-  const pending: IntakeDraft = { ...draft, modelSelection: selection, submittedAt: new Date().toISOString(), sourceType: sourceType === 'document' ? 'file' : sourceType, operationId: sourceOperation || operationId(), generationOrigin: generationBaseUrl, receiptState: 'unknown', uncertain: true }
-  if (pending.mode === 'file' && pending.file && 'name' in pending.file) await beginLocalFileAssociation(owner, pending.file, pending.operationId!)
-  // Fail closed on local persistence failure: do not dispatch an unprotected POST.
-  await writeIntake(owner, pending)
-  await guard(owner)
-  await markLocalFileDispatch(owner, pending.operationId!)
-  let response: { task_id: string; source_type?: string; state?: 'reserved' | 'accepted'; operation_id?: string }
-  try { response = await integrationJson<typeof response>(path, { method: 'POST', body, headers: { 'X-VINote-Operation-Id': pending.operationId! } }, owner, 180000) }
-  catch (cause) {
-    // A rejection may happen after reservation. Keep the operation even on 4xx.
-    await guard(owner)
-    throw cause
-  }
-  await guard(owner)
-  if (!/^[a-f0-9-]{36}$/.test(response.task_id)) throw new Error('服务未返回有效任务编号，请保留当前来源')
-  if (response.operation_id && response.operation_id !== pending.operationId) throw new Error('服务回执与原提交不一致，请核验原操作')
-  if (response.state && !['reserved', 'accepted'].includes(response.state)) throw new Error('服务回执状态无效，原操作保留，请继续核验')
-  const receipt: IntakeDraft = { ...pending, taskId: response.task_id, sourceType: response.source_type || pending.sourceType, receiptState: response.state || 'accepted', uncertain: response.state === 'reserved', recoverySupported: !!response.state }
-  // The screen retains this receipt even if its local persistence fails.
-  await writeIntake(owner, receipt).catch(() => {})
-  if (receipt.operationId && receipt.taskId) await advanceLocalFileAssociation(owner, receipt.operationId, receipt.taskId, response.state || 'accepted')
+  const receipt = await prepareClientNote(owner, draft)
+  return acceptClientSource(owner, receipt)
+}
+async function acceptClientSource(owner: string, receipt: IntakeDraft): Promise<IntakeDraft> {
+  if (receipt.file && 'name' in receipt.file) await beginLocalFileAssociation(owner, receipt.file, receipt.operationId!, { execution: 'client', modelOrigin: receipt.modelOrigin! })
+  await writeIntake(owner, receipt)
+  await markLocalFileDispatch(owner, receipt.operationId!)
+  await advanceLocalFileAssociation(owner, receipt.operationId!, receipt.taskId!, 'accepted')
+  // Only an explicit new submission starts work. Queries and old receipts never do.
+  await startClientNote(owner, receipt)
   return receipt
 }
+
 export async function recoverIntake(owner: string, draft: IntakeDraft): Promise<IntakeDraft> {
   await guard(owner)
   assertIntakeOrigin(draft)
+  if (draft.execution === 'client') { await readClientNote(owner, draft); return draft }
   if (!draft.operationId) throw new Error('旧提交没有操作编号，无法核验未知结果；原来源保留，请勿重复提交')
   let response: SourceReceipt
   try { response = await integrationJson<SourceReceipt>(`/api/source-requests/${encodeURIComponent(draft.operationId)}`, {}, owner) }
@@ -169,6 +156,21 @@ export async function recoverIntake(owner: string, draft: IntakeDraft): Promise<
 export async function inspectIntake(owner: string, draft: IntakeDraft) {
   await guard(owner)
   assertIntakeOrigin(draft)
+  if (draft.execution === 'client') {
+    const record = await readClientNote(owner, draft)
+    const checkpoint = record.transcription
+    const progress = record.stage === 'asr' && checkpoint?.version === 5 && checkpoint.duration > 0
+      ? Math.min(1, checkpoint.intervals.reduce((sum, part) => sum + part.end - part.start, 0) / checkpoint.duration) : undefined
+    if (!record.result) return { status: { status: record.status, message: record.message, progress, retryable: record.retryable } as IntakeStatus }
+    const note = await saveSourceNote(draft.taskId!, record.result.title, record.result.markdown, draft.sourceType || 'file', owner, draft.file?.createdAt || draft.submittedAt, draft.file && 'bilibiliSource' in draft.file ? draft.file.bilibiliSource : undefined)
+    await guard(owner)
+    if (draft.operationId) await advanceLocalFileAssociation(owner, draft.operationId, draft.taskId!, 'saved', note.id)
+    await mutateSlot(owner, async () => {
+      const current = await readIntake(owner)
+      if (selectionKey(current) === selectionKey(draft)) await writeSlot(owner, { mode: draft.mode, url: '' })
+    })
+    return { status: { status: 'success', result: record.result } as IntakeStatus, note }
+  }
   if (draft.receiptState === 'reserved' || draft.uncertain) throw new Error('提交已登记，尚未确认排队；请核验原提交，不重新派发')
   if (!draft.taskId) throw new Error('尚未收到任务编号，请检查提交状态')
   const status = await integrationJson<IntakeStatus>(`/api/task/${encodeURIComponent(draft.taskId)}`, {}, owner)
@@ -180,8 +182,11 @@ export async function inspectIntake(owner: string, draft: IntakeDraft) {
     await guard(owner)
     if (draft.operationId) await advanceLocalFileAssociation(owner, draft.operationId, draft.taskId, 'saved', note.id)
     // Clear only after local saving succeeds; a failed save keeps the accepted receipt.
-    await writeIntake(owner, { mode: draft.mode, url: '' })
+    await mutateSlot(owner, async () => {
+      const current = await readIntake(owner)
+      if (selectionKey(current) === selectionKey(draft)) await writeSlot(owner, { mode: draft.mode, url: '' })
+    })
     return { status, note }
   }
-  return { status }
+  return { status: { ...status, retryable: false } }
 }

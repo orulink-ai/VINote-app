@@ -3,7 +3,7 @@ import { TransportError } from './errors'
 export type TextStreamResponse = { status: number; text: string; contentType: string; requestId?: string }
 
 /** RN's XMLHttpRequest supports incremental text on Android and iOS. */
-export function requestTextStream(url: string, init: RequestInit, receive: (text: string) => void): Promise<TextStreamResponse> {
+export function requestTextStream(url: string, init: RequestInit, receive: (text: string) => void, onSendAttempt?: () => void): Promise<TextStreamResponse> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     let settled = false
@@ -68,6 +68,7 @@ export function requestTextStream(url: string, init: RequestInit, receive: (text
       // iOS's native timeout measures inactivity. This deadline also bounds
       // continuously active streams, starting when the request is sent.
       deadline = setTimeout(timeout, 900_000)
+      onSendAttempt?.()
       xhr.send(init.body as string)
     } catch (error) { fail(error) }
   })

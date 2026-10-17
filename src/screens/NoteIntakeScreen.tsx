@@ -1,3 +1,5 @@
+import { leaveClientIntake } from '../lib/noteIntake'
+import { retryClientNote } from '../lib/clientNotePipeline'
 import { DetailDisclosure } from '../components/DetailDisclosure'
 import { BottomActionSheet } from '../components/BottomActionSheet'
 import { ApiError } from '../lib/errors'
@@ -76,7 +78,7 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
         else onSaved(result.note.id)
         return
       }
-      const failed = ['failed', 'error', 'not_found'].includes(result.status.status)
+      const failed = ['failed', 'error', 'not_found', 'unknown'].includes(result.status.status)
       setTerminal(failed); setRetryable(!current.current.retryUncertain && !!result.status.retryable && ['failed', 'error'].includes(result.status.status))
       const measured = result.status.progress
       setTaskProgress(typeof measured === 'number' && Number.isFinite(measured) && measured >= 0 && measured <= 1 ? measured * 100 : null)
@@ -116,6 +118,9 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
     if (!ready) return
     let active = true
     const account = owner.current
+    const source = current.current
+    const deviceOnly = source.execution === 'client' || source.mode === 'file' && source.file && ['audio', 'video'].includes(intakeSourceType(source.file)) || source.mode === 'url' && isBilibiliUrl(source.url) && deviceBilibiliAvailable()
+    if (deviceOnly) { setServiceState('ready'); setServiceError(''); setUploadLimit(null); setVideoCapabilities({ video_url: true, video_url_platforms: ['bilibili'] }); return }
     setServiceState('checking'); setServiceError(''); setUploadLimit(null); setVideoCapabilities(null)
     const guard = () => { if (!active || !mounted.current || owner.current !== account) throw new Error('页面或账号已变化') }
     void verifyContentService(account, guard).then(capabilities => {
@@ -128,7 +133,7 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
         cause.code === 'CONTENT_SERVICE_PROTOCOL_UNSUPPORTED' ? '服务需要更新，请联系管理员。' : '暂时无法连接服务，请稍后重试。')
     })
     return () => { active = false }
-  }, [ready, prepareAttempt, serviceAttempt])
+  }, [ready, prepareAttempt, serviceAttempt, draft.mode, draft.file?.id, isBilibiliUrl(draft.url)])
   const leave = () => {
     if (modelSheetOpen.current) { closeModels(); return }
     if (locked.current) return
@@ -176,7 +181,7 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
             const next: IntakeDraft = { mode: 'file', url: '', file }
             await writeIntake(account, next)
             if (!mounted.current) return
-            accept(next); setMessage('音频已保存到笔记资料。点击生成后才上传处理；原链接与分P已保留。')
+            accept(next); setMessage('音频已保存到笔记资料。点击生成后使用所选模型处理；原链接与分P已保留。')
           } catch (cause) { if (mounted.current) { setMessage(''); setError(cause instanceof Error ? cause.message : '保存音频失败，未提交生成。') } }
           finally { deviceDownload.current = null; locked.current = false; if (mounted.current) { setDeviceProgress(null); setBusy(false) } }
         })()
@@ -279,6 +284,10 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
     locked.current = true; setBusy(true); setError('')
     let confirmationNeeded = false
     try {
+      if (draft.execution === 'client') {
+        void retryClientNote(owner.current, draft).then(() => query.current()).catch(cause => { if (mounted.current) setError(cause.message) })
+        setTerminal(false); setRetryable(false); schedule(); return
+      }
       const binding = bindIntakeModel(owner.current, draft)
       await verifyIntakeModel(binding, current.current)
       const currentTask = await inspectIntake(binding.owner, draft)
@@ -293,7 +302,29 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
     } finally { locked.current = false; if (mounted.current) setBusy(false) }
     if (confirmationNeeded && mounted.current) await openModels()
   }
-  const changeSource = () => Alert.alert('保留原任务，整理另一份内容？', '原任务不会被取消，已保存笔记和原文件也不会删除。', [{ text: '取消', style: 'cancel' }, { text: '更换来源', onPress: () => void writeIntake(owner.current, empty).then(() => { if (timer.current) clearTimeout(timer.current); accept(empty); setTerminal(false); setError(''); setMessage('') }).catch(cause => setError(cause.message)) }])
+  const changeSource = () => {
+    const expected = current.current, account = owner.current
+    Alert.alert('保留记录，整理其他资料？', '原来源、处理记录和未确认请求均保留。不会取消、查询或重新发送原模型请求。', [
+      { text: '取消', style: 'cancel' }, { text: '整理其他资料', onPress: () => {
+        if (locked.current || !mounted.current || owner.current !== account) return
+        locked.current = true; setBusy(true)
+        void (async () => {
+          try {
+            if (expected.execution === 'client') await leaveClientIntake(account, expected)
+            else {
+              const stored = await readIntake(account)
+              if (stored.operationId !== expected.operationId || stored.taskId !== expected.taskId || stored.generationOrigin !== expected.generationOrigin) throw new Error('当前来源已变化，未清除新的输入')
+              await writeIntake(account, empty)
+            }
+            if (!mounted.current) return
+            if (timer.current) clearTimeout(timer.current)
+            accept(empty); saved.current = false; setTerminal(false); setRetryable(false); setError(''); setMessage('原处理记录已保留，请选择其他资料。')
+          } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : '来源已变化，未清除当前输入') }
+          finally { locked.current = false; if (mounted.current) setBusy(false) }
+        })()
+      } },
+    ])
+  }
   const leaveReserved = () => {
     if (locked.current || current.current.receiptState !== 'reserved') return
     const original = current.current, account = owner.current
@@ -331,14 +362,14 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
       {!draft.taskId && <Text style={styles.subtitle}>选择来源，生成可编辑的笔记。原文件保留在文件库。</Text>}
       {ready && <View style={{ gap: 8 }}>
         <AsyncState loading={serviceState === 'checking'} loadingLabel="正在检查服务…" error={serviceError} onRetry={() => setServiceAttempt(value => value + 1)} retryLabel="重新检查服务" />
-        {serviceState === 'ready' && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>内容服务已就绪</Text>}
+        {serviceState === 'ready' && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>{draft.mode === 'file' && draft.file && ['audio', 'video'].includes(intakeSourceType(draft.file)) ? '媒体由设备连接所选模型处理' : '内容服务已就绪'}</Text>}
       </View>}
       {awaitingLibraryChoice && <View style={styles.card}><Text style={styles.noteTitle}>所选文件：{initialFile!.name}</Text><Text style={styles.subtitle}>另有一份来源已保留：{draft.file ? intakeFileName(draft.file) : draft.url || '原提交'}。请选择要继续的内容，尚未提交所选文件。</Text><PrimaryButton title="使用文件库中的文件" disabled={busy || !ready} onPress={useLibraryFile} /><PrimaryButton secondary title="继续原来源" disabled={busy || !ready} onPress={() => setContinueExisting(true)} /></View>}
       {!!recoveredNoteId && <PrimaryButton secondary title="查看原任务生成的笔记" onPress={() => onSaved(recoveredNoteId)} />}
       {!awaitingLibraryChoice && !draft.taskId && <>
         <View style={{ flexDirection: 'row', gap: 8 }}>{(['url', 'file'] as const).map(mode => <Pressable key={mode} accessibilityRole="tab" accessibilityState={{ selected: draft.mode === mode }} disabled={busy || !ready || !!draft.operationId || draft.uncertain} onPress={() => { accept({ ...draft, mode }); setError(''); setMessage('') }} style={{ minHeight: 44, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: draft.mode === mode ? colors.primarySoft : colors.card }}><Text style={styles.noteTitle}>{mode === 'url' ? linkLabel : '本地文件'}</Text></Pressable>)}</View>
         {draft.mode === 'url' ? <View style={{ gap: 10 }}><Field label={linkLabel} value={draft.url} editable={!busy && ready && !draft.operationId && !draft.uncertain} multiline onChangeText={url => accept({ ...draft, url })} placeholder={bilibiliLinks ? "粘贴 B 站、b23.tv、网页或文档链接" : legacyVideoLinks ? "粘贴网页、视频或文档链接" : "粘贴网页、PDF 或 Word 链接"} /><Text style={styles.subtitle}>{bilibiliLinks ? '支持 B 站与 b23.tv 视频、普通网页、PDF 和 DOCX 链接；其他视频或音频请导入文件。' : legacyVideoLinks ? '支持普通网页、公开视频、PDF 和 DOCX 文档链接。' : '支持普通网页、PDF 和 DOCX 文档链接；视频或音频请导入文件。'}登录或动态网页请导出文件再导入。</Text></View>
-          : <View style={[styles.card, { gap: 12 }]}><Text style={styles.noteTitle}>{draft.file ? intakeFileName(draft.file) : '选择要整理的文件'}</Text><Text style={styles.subtitle}>PDF、Word DOCX、音视频、文字与字幕。{uploadLimit !== null ? `上传限 ${Math.floor(uploadLimit / 1024 / 1024)} MB；PDF 和 Word 限 ${Math.floor(Math.min(uploadLimit, 20 * 1024 * 1024) / 1024 / 1024)} MB。` : '文件上限将在服务检查后显示。'}PDF 限 200 页；扫描 PDF 请先识别文字。选择后先保存在文件库，点击生成才上传处理。</Text><PrimaryButton secondary title={draft.file ? '重新选择文件' : '选择文件'} disabled={busy || !ready || !!draft.operationId || draft.uncertain} onPress={() => void choose()} /></View>}
+          : <View style={[styles.card, { gap: 12 }]}><Text style={styles.noteTitle}>{draft.file ? intakeFileName(draft.file) : '选择要整理的文件'}</Text><Text style={styles.subtitle}>PDF、Word DOCX、音视频、文字与字幕。{uploadLimit !== null ? `上传限 ${Math.floor(uploadLimit / 1024 / 1024)} MB；PDF 和 Word 限 ${Math.floor(Math.min(uploadLimit, 20 * 1024 * 1024) / 1024 / 1024)} MB。` : '文件上限将在服务检查后显示。'}PDF 限 200 页；扫描 PDF 请先识别文字。选择后先保存在文件库；媒体由设备连接所选模型处理，文档仅上传提取正文。</Text><PrimaryButton secondary title={draft.file ? '重新选择文件' : '选择文件'} disabled={busy || !ready || !!draft.operationId || draft.uncertain} onPress={() => void choose()} /></View>}
       </>}
       {!!fileTooLarge && <AsyncState error={`当前文件超过 ${Math.floor(fileLimit! / 1024 / 1024)} MB 上限，请另选文件。原文件仍保留。`} />}
       {deviceBilibiliPath && <Text style={styles.subtitle}>先读取音频并保存到笔记资料；保存后再点击生成。</Text>}
@@ -361,7 +392,7 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
       {!ready && !!error && <PrimaryButton secondary title="重新读取来源" onPress={() => setPrepareAttempt(value => value + 1)} />}
       {draft.receiptState === 'reserved' && <PrimaryButton secondary title="整理另一份内容" disabled={busy} onPress={leaveReserved} />}
       {!draft.taskId && !busy && message && !error && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>{sourceRecoveryCopy(message)}</Text>}
-      {!awaitingLibraryChoice && (draft.taskId ? <View style={{ gap: 10 }}><PrimaryButton title={draft.receiptState === 'reserved' ? '核验原提交' : '重新查询结果'} disabled={busy} onPress={() => void query.current()} />{retryable && <PrimaryButton secondary title={draft.modelConfirmationRequired ? "确认模型并恢复原任务" : "重试处理原任务"} disabled={busy} onPress={() => void retry()} />}{terminal && <PrimaryButton tertiary title="更换来源" disabled={busy} onPress={changeSource} />}</View>
+      {!awaitingLibraryChoice && (draft.taskId ? <View style={{ gap: 10 }}><PrimaryButton title={draft.receiptState === 'reserved' ? '核验原提交' : '重新查询结果'} disabled={busy} onPress={() => void query.current()} />{retryable && <PrimaryButton secondary title={draft.modelConfirmationRequired ? "确认模型并恢复原任务" : "重试处理原任务"} disabled={busy} onPress={() => void retry()} />}{terminal && <PrimaryButton tertiary title={draft.execution === 'client' ? "保留记录，整理其他资料" : "更换来源"} disabled={busy} onPress={changeSource} />}</View>
         : <PrimaryButton title={draft.uncertain || draft.operationId ? '核验原提交' : deviceBilibiliPath ? '读取B站内容' : '生成总结笔记'} loading={busy} disabled={!ready || (!draft.operationId && !draft.uncertain && (serviceState !== 'ready' || !!fileTooLarge || iosBilibiliBlocked || (videoLinkBlocked && !deviceBilibiliPath) || (draft.mode === 'url' ? !draft.url.trim() : !draft.file)))} onPress={start} />)}
       {!awaitingLibraryChoice && draft.taskId && <DetailDisclosure key={`source-${draft.generationOrigin}-${draft.operationId}-${draft.taskId}`} title="来源与保存位置">
           <Text style={styles.subtitle}>{draft.mode === 'url' ? draft.url || '已提交的链接' : draft.file ? intakeFileName(draft.file) : '已提交的文件'}</Text>

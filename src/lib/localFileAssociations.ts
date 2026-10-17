@@ -1,10 +1,12 @@
 import Storage from '@react-native-async-storage/async-storage'
 import FS from 'react-native-fs'
+import { API_BASE_URL } from '../config/env'
 import { generationBaseUrl } from './integration'
 import { readAccountId } from './storage'
 import type { LocalFile } from './localFiles'
 
 export type LocalFileAssociation = {
+  execution?: 'client'; modelOrigin?: string
   owner: string; localFileId: string; operationId: string; generationOrigin: string
   taskId?: string; noteId?: string; state: 'prepared' | 'unknown' | 'reserved' | 'accepted' | 'saved'
 }
@@ -22,6 +24,7 @@ async function guard(owner: string) {
   if (!owner || await readAccountId() !== owner) throw new Error('账号已切换，原件关联未写入其他账号')
 }
 function checked(value: LocalFileAssociation, owner: string): LocalFileAssociation {
+  if (value?.execution && (value.execution !== 'client' || typeof value.modelOrigin !== 'string' || !value.modelOrigin)) throw new Error('设备处理来源记录不完整')
   if (!value || value.owner !== owner || !uuid.test(value.localFileId) || !uuid.test(value.operationId) || !value.generationOrigin ||
       !['prepared', 'unknown', 'reserved', 'accepted', 'saved'].includes(value.state) ||
       (value.taskId != null && !uuid.test(value.taskId)) ||
@@ -40,16 +43,17 @@ export async function readLocalFileAssociation(owner: string, operationId: strin
   if (record.operationId !== operationId) throw new Error('原件关联与原提交不一致')
   return record
 }
-export async function beginLocalFileAssociation(owner: string, file: LocalFile, operationId: string) {
-  return serialize(owner, operationId, () => begin(owner, file, operationId))
+export async function beginLocalFileAssociation(owner: string, file: LocalFile, operationId: string, context?: { execution: 'client'; modelOrigin: string }) {
+  return serialize(owner, operationId, () => begin(owner, file, operationId, context))
 }
-async function begin(owner: string, file: LocalFile, operationId: string) {
+async function begin(owner: string, file: LocalFile, operationId: string, context?: { execution: 'client'; modelOrigin: string }) {
   await guard(owner)
   if (!generationBaseUrl || !uuid.test(operationId) || !uuid.test(file.id) || !/^[a-z0-9]{1,8}$/.test(file.extension) ||
       file.uri !== `file://${FS.DocumentDirectoryPath}/files/accounts/${encodeURIComponent(owner)}/${file.id}.${file.extension}`) throw new Error('原文件或内容处理服务未核验，不能登记关联')
+  if (context && context.modelOrigin !== API_BASE_URL.replace(/\/+$/, '')) throw new Error('原模型服务来源已变化')
   const existing = await readLocalFileAssociation(owner, operationId)
   if (existing) {
-    if (existing.localFileId !== file.id || existing.generationOrigin !== generationBaseUrl) throw new Error('原提交已绑定另一来源或服务，不能替换')
+    if (existing.localFileId !== file.id || existing.generationOrigin !== generationBaseUrl || existing.execution !== context?.execution || existing.modelOrigin !== context?.modelOrigin) throw new Error('原提交已绑定另一来源或服务，不能替换')
     return existing
   }
   // Evidence is the actual imported file's metadata and nonempty binary; never
@@ -60,7 +64,7 @@ async function begin(owner: string, file: LocalFile, operationId: string) {
   const stat = await FS.stat(file.uri.replace('file://', ''))
   await guard(owner)
   if (!Number(stat.size) || Number(stat.size) !== metadata.size || Number(stat.size) !== file.size) throw new Error('原文件已变化，请重新选择来源')
-  const record: LocalFileAssociation = { owner, localFileId: file.id, operationId, generationOrigin: generationBaseUrl, state: 'prepared' }
+  const record: LocalFileAssociation = { ...context, owner, localFileId: file.id, operationId, generationOrigin: generationBaseUrl, state: 'prepared' }
   await guard(owner)
   await Storage.setItem(prefix(owner) + operationId, JSON.stringify(record))
   await guard(owner)

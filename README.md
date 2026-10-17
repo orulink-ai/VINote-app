@@ -24,7 +24,7 @@ React Native Community CLI 原生应用，使用统一的 React Native 原生组
 
 ## 网络与平台边界
 
-0.1.4 测试包模型直连 VILab `http://192.168.1.143:9876`，正式包模型直连 `https://api.orulink.ai`；两包账号统一使用 `https://supabase-vinote.orulink.ai`，内容与飞书统一使用公网 `/vinote-api`。内网包是混合配置：链接/上传笔记由公网内容后端执行，不能声称其模型调用走 LAN；所选模型 ID 必须在该后端可用，不自动替换。详见 [0.1.4 发布说明](docs/releases/0.1.4.md)。Android 和 iOS 的账号请求遵循系统网络设置，构建命令自动选择部署配置。旧账号需在新项目重新注册，旧数据暂留旧项目。
+0.1.4 测试包模型直连 VILab `http://192.168.1.143:9876`，正式包模型直连 `https://api.orulink.ai`；两包账号统一使用 `https://supabase-vinote.orulink.ai`，内容与飞书统一使用公网 `/vinote-api`。内网包是混合配置：新链接/上传笔记由 App 连接该包固定模型 URL 推理，共享服务仅提取正文，不跨模型 Origin 回退。详见 [0.1.4 发布说明](docs/releases/0.1.4.md)。Android 和 iOS 的账号请求遵循系统网络设置，构建命令自动选择部署配置。旧账号需在新项目重新注册，旧数据暂留旧项目。
 
 ASR 明确返回 Aliyun 或 Volcengine 空转写错误时，保留为空分段并继续后续音频；全部分段都为空时仍报告未识别到有效语音，其他服务故障沿用重试与失败处理。
 
@@ -118,3 +118,8 @@ PR10 检查时没有任何 workflow，GitHub Actions API 返回 0 个 workflow�
 设备读取不向 B站发送 VINote 凭证或浏览器 Cookie，不依赖 USB reverse 或代理，不绕验证码，读取受限会如实提示。旧未知或已登记操作只核验，不自动重放或换操作；可明确保留原记录后整理另一份内容。iOS 暂不支持设备读取 B站，请导入文件。
 
 该流程已在一份40秒公开样本上完成 Android 下载、上传、Aliyun ASR、DeepSeek 生成、保存重开及文件库来源/关联核验。具体构建、离线回归、实际验收与未测边界见[设备读取合同与验收记录](docs/bilibili-device-download.md)。
+
+
+### 笔记模型来源修复
+
+两包新笔记操作统一由设备直连各自固定 VILab URL 进行 ASR/LLM；共享内容服务仅提取网页/文档正文，账号与飞书仍共享。旧云任务只读恢复，不迁移或重新推理。见[来源冻结与纯提取协议](docs/app-note-model-origin.md)。此前“链接/上传笔记由公网后端推理”的说明属于旧路径，已由此合同替代；版本仍为0.1.4。
