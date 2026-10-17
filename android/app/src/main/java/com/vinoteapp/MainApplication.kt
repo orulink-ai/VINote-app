@@ -1,6 +1,8 @@
 package com.vinoteapp
 
 import android.app.Application
+import android.graphics.Typeface
+import com.facebook.react.common.assets.ReactFontManager
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -25,6 +27,9 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    ReactFontManager.getInstance().addCustomFont(
+      "VINoteSans", Typeface.createFromAsset(assets, "fonts/NotoSansSC-Regular.ttf")
+    )
     OkHttpClientProvider.setOkHttpClientFactory {
       OkHttpClientProvider.createClientBuilder()
         .proxySelector(AccountProxySelector())

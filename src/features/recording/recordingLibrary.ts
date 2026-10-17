@@ -1,14 +1,34 @@
+import type { ASRDiagnostic } from '../../lib/asrFailure'
 import FS from 'react-native-fs'
 import Share from 'react-native-share'
 import { NativeModules } from 'react-native'
 import { recordingTitle } from './recordingTitle'
 import { readAccountId } from '../../lib/storage'
 import type { TranscriptionCheckpoint, SummaryCheckpoint } from '../../lib/meetingCloud'
+import type { SpeakerCheckpoint } from '../../lib/meetingSpeakers'
 import type { ProcessingTiming } from '../../lib/processingHelpers'
 import { listNotes } from '../../lib/notes'
-import { acquireRecordingLock } from './recordingProcessing'
+import { acquireRecordingLock, getGenerationProgress } from './recordingProcessing'
+import { identityEpoch, SessionScopeChangedError } from '../../lib/sessionIdentity'
 
-export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; lastNoteVersion?: number; error?: string; errorDetails?: { status: number; code?: string; requestId?: string }; processingTimings?: ProcessingTiming[]; transcriptionCheckpoint?: TranscriptionCheckpoint; summaryCheckpoint?: SummaryCheckpoint; generation?: { status: 'pending' | 'paused'; asrModel: string; llmModel: string; startedAt: string; version?: number } }
+const metadataTransactions = new Map<string, Promise<unknown>>()
+async function metadataTransaction<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  const pending = (metadataTransactions.get(key) || Promise.resolve()).catch(() => {}).then(operation)
+  metadataTransactions.set(key, pending)
+  try { return await pending } finally { if (metadataTransactions.get(key) === pending) metadataTransactions.delete(key) }
+}
+async function recordingScope() {
+  const owner = await readAccountId(), epoch = identityEpoch()
+  if (!owner) throw new Error('请联网登录一次，以确认本机录音所属账号')
+  const directory = `${FS.DocumentDirectoryPath}/recordings/accounts/${encodeURIComponent(owner)}`
+  const guard = async () => {
+    if (identityEpoch() !== epoch || await readAccountId() !== owner || identityEpoch() !== epoch) throw new SessionScopeChangedError()
+  }
+  return { owner, directory, guard }
+}
+
+export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; bookmarks?: Array<{ seconds: number; label: string }>; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; lastNoteVersion?: number; error?: string; errorDetails?: { status?: number; code?: string; requestId?: string; asrDiagnostic?: ASRDiagnostic }; processingTimings?: ProcessingTiming[]; transcriptionCheckpoint?: TranscriptionCheckpoint; summaryCheckpoint?: SummaryCheckpoint; speakerCheckpoint?: SpeakerCheckpoint; speakerAliases?: Record<string, string>; generation?: { status: 'pending' | 'paused'; asrModel: string; llmModel: string; startedAt: string; version?: number; summaryOnly?: SummaryOnlyGeneration } }
+export type SummaryOnlyGeneration = { evidenceKey: string }
 export async function accountDirectory() {
   const account = await readAccountId()
   if (!account) throw new Error('请联网登录一次，以确认本机录音所属账号')
@@ -27,42 +47,59 @@ export async function recordingPath(ext = 'm4a') {
   return `${directory}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
 }
 export async function saveRecording(record: LocalRecording) {
-  const directory = await accountDirectory()
+  const scope = await recordingScope(), directory = scope.directory
   if (!/^[a-zA-Z0-9-]+$/.test(record.id) || record.uri.replace('file://', '') !== `${directory}/${record.id}.${extension(record)}`) throw new Error('录音不属于当前账号')
-  await FS.mkdir(directory)
+  const body = JSON.stringify(record)
+  return metadataTransaction(`${directory}/${record.id}`, async () => {
+  await scope.guard()
+  await FS.mkdir(directory); await scope.guard()
   const path = `${directory}/${record.id}.json`
-  await FS.writeFile(`${path}.tmp`, JSON.stringify(record), 'utf8')
+  await FS.writeFile(`${path}.tmp`, body, 'utf8'); await scope.guard()
   // iOS moveFile 不覆盖已存在目标；临时文件保留完整状态供中断恢复。
-  if (await FS.exists(path)) await FS.unlink(path)
-  await FS.moveFile(`${path}.tmp`, path)
-  return record
+  if (await FS.exists(path)) { await scope.guard(); await FS.unlink(path) }
+  await scope.guard(); await FS.moveFile(`${path}.tmp`, path); await scope.guard()
+  return JSON.parse(body) as LocalRecording
+  })
 }
 export async function listRecordings(): Promise<LocalRecording[]> {
-  const directory = await accountDirectory()
-  if (!await FS.exists(directory)) return []
-  const files = await FS.readDir(directory)
-  const metadata = files.filter(file => file.name.endsWith('.json') || file.name.endsWith('.json.tmp'))
-  const recovered = new Map<string, LocalRecording>()
-  for (const file of metadata.sort((a, b) => a.name.endsWith('.tmp') === b.name.endsWith('.tmp') ? 0 : a.name.endsWith('.tmp') ? 1 : -1)) {
-    try {
-      const record = JSON.parse(await FS.readFile(file.path, 'utf8')) as LocalRecording
-      if (/^[a-zA-Z0-9-]+$/.test(record.id) && record.title) {
-        // iOS 容器路径可能改变，仅在当前账号目录内重新定位原音频。
-        record.uri = `file://${directory}/${record.id}.${extension(record)}`
-        const exists = await FS.exists(`${directory}/${record.id}.${extension(record)}`)
-        if (!exists || record.state === 'recording') {
-          record.state = 'interrupted'
-          record.error = exists ? '录音曾中断，已保留文件；请播放检查完整性后再生成纪要' : '录音文件未找到，记录已保留；请检查是否曾录音成功'
+  const scope = await recordingScope(), directory = scope.directory
+  if (!await FS.exists(directory)) { await scope.guard(); return [] }
+  await scope.guard()
+  const files = await FS.readDir(directory); await scope.guard()
+  const ids = new Set(files.map(file => file.name.endsWith('.json.tmp') ? file.name.slice(0, -9) : file.name.endsWith('.json') ? file.name.slice(0, -5) : file.name.slice(0, file.name.lastIndexOf('.'))))
+  const results: LocalRecording[] = []
+  for (const id of ids) {
+    if (!/^[a-zA-Z0-9-]+$/.test(id)) continue
+    const record = await metadataTransaction(`${directory}/${id}`, async () => {
+      await scope.guard()
+      let hadMetadata = files.some(file => file.name === `${id}.json` || file.name === `${id}.json.tmp`)
+      // Recheck paths after taking the lock, not just the pre-commit directory snapshot.
+      for (const suffix of ['.json.tmp', '.json']) {
+        const path = `${directory}/${id}${suffix}`
+        if (!await FS.exists(path) && !files.some(file => file.name === `${id}${suffix}`)) continue
+        hadMetadata = true
+        let value: LocalRecording
+        try { value = JSON.parse(await FS.readFile(path, 'utf8')) as LocalRecording }
+        catch { continue }
+        if (value.id !== id || !value.title) continue
+        value.uri = `file://${directory}/${id}.${extension(value)}`
+        const exists = await FS.exists(value.uri.replace('file://', '')); await scope.guard()
+        if (!exists || value.state === 'recording') {
+          value.state = 'interrupted'
+          value.error = exists ? '录音曾中断，已保留文件；请播放检查完整性后再生成纪要' : '录音文件未找到，记录已保留；请检查是否曾录音成功'
         }
-        recovered.set(record.id, record)
+        return value
       }
-    } catch { /* 单条损坏元数据不能阻止其他录音展示；原音频仍可恢复。 */ }
+      const active = getGenerationProgress()
+      if (hadMetadata || active?.owner === scope.owner && active.recordId === id) throw new Error('录音信息暂未读取，请重试；不会替换原记录')
+      const audio = files.find(file => file.name.startsWith(`${id}.`) && extensions.has(file.name.split('.').pop() || '') && Number(file.size) > 0)
+      if (!audio) return null
+      await scope.guard()
+      return { id, extension: audio.name.split('.').pop(), state: 'interrupted' as const, error: '已找回原音频，请播放检查完整性；文件修改时间不代表录制开始时间', title: recordingTitle('', '已恢复录音'), uri: `file://${directory}/${audio.name}`, createdAt: '', duration: 0 }
+    })
+    if (record) results.push(record)
   }
-  const results = [...recovered.values()]
-  // 恢复已结束但元数据尚未写入的录音，避免保存异常后无入口找回。
-  for (const file of files.filter(item => extensions.has(item.name.split('.').pop() || '') && Number(item.size) > 0)) {
-    if (!results.some(item => item.uri.replace('file://', '') === file.path)) results.push({ id: file.name.slice(0, file.name.lastIndexOf('.')), extension: file.name.split('.').pop(), state: 'interrupted', error: '已找回原音频，请播放检查完整性', title: recordingTitle((file.mtime || new Date()).toISOString(), '已恢复录音'), uri: `file://${file.path}`, createdAt: (file.mtime || new Date()).toISOString(), duration: 0 })
-  }
+  await scope.guard()
   return results.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 export async function exportRecording(record: LocalRecording) {
@@ -113,6 +150,20 @@ export async function renameRecording(record: LocalRecording, title: string) {
   } finally { release() }
 }
 
+export async function renameSpeaker(record: LocalRecording, speakerId: string, name: string) {
+  const clean = name.trim()
+  if (!/^speaker_\d+$/.test(speakerId) || !clean || clean.length > 40) throw new Error('请输入 1–40 字的说话人名称')
+  const owner = await readAccountId()
+  if (!owner) throw new Error('请重新登录')
+  const release = acquireRecordingLock(owner, record.id)
+  try {
+    const current = (await listRecordings()).find(item => item.id === record.id)
+    if (!current || !current.speakerCheckpoint?.turns.some(turn => turn.speakerId === speakerId)) throw new Error('说话人分析已变化，请刷新后重试')
+    if (current.generation?.status === 'pending') throw new Error('正在处理录音，请完成后改名')
+    return await saveRecording({ ...current, speakerAliases: { ...current.speakerAliases, [speakerId]: clean } })
+  } finally { release() }
+}
+
 export async function unlinkRecordingNote(noteId: string, deletedVersion: number, taskId?: string | null) {
   const notes = await listNotes()
   for (const record of await listRecordings()) {
@@ -142,9 +193,9 @@ export async function finalizeRecording(record: LocalRecording) {
   if (!Number.isFinite(duration) || duration <= 0) throw new Error('录音文件不完整，请保留文件并检查')
   return saveRecording({ ...record, duration: Math.round(duration), state: 'saved', error: undefined })
 }
-export async function importRecording(): Promise<LocalRecording | null> {
+export async function importRecording(selection?: { uri: string; name: string }): Promise<LocalRecording | null> {
   const owner = await readAccountId()
-  const picked = await NativeModules.MeetingFiles.pickAudio() as { uri: string; name: string } | null
+  const picked = selection || await NativeModules.MeetingFiles.pickAudio() as { uri: string; name: string } | null
   if (!picked) return null
   let target: string | undefined
   try {

@@ -1,4 +1,4 @@
-import { acquireRecordingLock } from '../src/features/recording/recordingProcessing'
+import { acquireGenerationSlot, acquireRecordingLock } from '../src/features/recording/recordingProcessing'
 
 test('serializes operations per owner and recording and releases idempotently', () => {
   const release = acquireRecordingLock('alice', 'meeting-1')
@@ -11,4 +11,13 @@ test('serializes operations per owner and recording and releases idempotently', 
   releaseAgain()
   releaseOtherOwner()
   releaseOtherRecording()
+})
+
+test('limits complete generation across records and accounts without blocking record reads', () => {
+  const release = acquireGenerationSlot()
+  expect(() => acquireGenerationSlot()).toThrow('已有录音正在整理')
+  const releaseRecord = acquireRecordingLock('bob', 'meeting-2')
+  releaseRecord()
+  release(); release()
+  acquireGenerationSlot()()
 })

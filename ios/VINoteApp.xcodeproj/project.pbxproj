@@ -15,6 +15,7 @@
 		AA0123456789012345678900 /* MeetingAudio.m in Sources */ = {isa = PBXBuildFile; fileRef = BB0123456789012345678900 /* MeetingAudio.m */; };
 		AA0123456789012345678901 /* MeetingFiles.m in Sources */ = {isa = PBXBuildFile; fileRef = BB0123456789012345678901 /* MeetingFiles.m */; };
 		AA0123456789012345678902 /* MeetingProcessing.m in Sources */ = {isa = PBXBuildFile; fileRef = BB0123456789012345678902 /* MeetingProcessing.m */; };
+		CC1100110011001100110001 /* NotoSansSC-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CC1100110011001100110002 /* NotoSansSC-Regular.ttf */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,6 +32,7 @@
 		BB0123456789012345678901 /* MeetingFiles.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = MeetingFiles.m; path = VINoteApp/MeetingFiles.m; sourceTree = "<group>"; };
 		BB0123456789012345678902 /* MeetingProcessing.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = MeetingProcessing.m; path = VINoteApp/MeetingProcessing.m; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		CC1100110011001100110002 /* NotoSansSC-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = ../assets/fonts/NotoSansSC-Regular.ttf; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -48,6 +50,7 @@
 		13B07FAE1A68108700A75B9A /* VINoteApp */ = {
 			isa = PBXGroup;
 			children = (
+				CC1100110011001100110002 /* NotoSansSC-Regular.ttf */,
 				BB0123456789012345678900 /* MeetingAudio.m */,
 				BB0123456789012345678901 /* MeetingFiles.m */,
 				BB0123456789012345678902 /* MeetingProcessing.m */,
@@ -168,6 +171,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
+				CC1100110011001100110001 /* NotoSansSC-Regular.ttf in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				A851DD4845387A68320C507D /* PrivacyInfo.xcprivacy in Resources */,
 			);
@@ -271,7 +275,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = VINoteApp/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
@@ -279,7 +283,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.3;
+				MARKETING_VERSION = 0.2.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -301,14 +305,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				INFOPLIST_FILE = VINoteApp/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.3;
+				MARKETING_VERSION = 0.2.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",

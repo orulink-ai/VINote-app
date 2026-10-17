@@ -1,5 +1,6 @@
 {
   "channel": "public",
+  "integrationBaseUrl": "https://supabase-vinote.orulink.ai/vinote-api",
   "apiBaseUrl": "https://api.orulink.ai",
   "authBaseUrl": "https://supabase-vinote.orulink.ai",
   "accountProxyHost": "",

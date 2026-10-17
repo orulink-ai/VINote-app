@@ -2,6 +2,12 @@ const { test } = require('node:test')
 const assert = require('node:assert/strict')
 const { validateDeployment } = require('./validate-deployment.cjs')
 const base = { channel: 'public', apiBaseUrl: 'https://api.vinote.app', authBaseUrl: 'https://account.supabase.co', accountProxyHost: '', accountProxyPort: 7890 }
+
+test('accept the shared API prefix only for the integration origin', () => {
+  assert.doesNotThrow(() => validateDeployment({ ...base, integrationBaseUrl: 'https://supabase-vinote.orulink.ai/vinote-api' }))
+  for (const suffix of ['/vinote-api/api', '/vinote-api?token=x', '/other'])
+    assert.throws(() => validateDeployment({ ...base, integrationBaseUrl: 'https://supabase-vinote.orulink.ai' + suffix }))
+})
 test('reject private addresses, IP aliases and local names in public builds', () => {
   for (const host of ['192.168.1.143', '10.0.2.2', '172.16.0.1', '127.1', '2130706433', '[::1]', '[fc00::1]', 'server', 'server.local', 'LOCALHOST.', 'server.home.arpa']) {
     assert.throws(() => validateDeployment({ ...base, apiBaseUrl: `https://${host}` }), host)

@@ -10,6 +10,7 @@ export function requestTextStream(url: string, init: RequestInit, receive: (text
     let received = 0
     let deadline: ReturnType<typeof setTimeout> | undefined
     const clean = () => {
+      init.signal?.removeEventListener('abort', abort)
       if (deadline !== undefined) clearTimeout(deadline)
       deadline = undefined
       xhr.onload = xhr.onerror = xhr.ontimeout = xhr.onabort = xhr.onprogress = null
@@ -21,6 +22,7 @@ export function requestTextStream(url: string, init: RequestInit, receive: (text
       try { xhr.abort() } catch { /* Preserve the request's original failure. */ }
       reject(error)
     }
+    const abort = () => fail(new TransportError('账号核验或请求已中断；本机内容与原请求记录仍保留'))
     const consume = () => {
       if (settled || xhr.status < 200 || xhr.status >= 300) return
       try {
@@ -36,6 +38,8 @@ export function requestTextStream(url: string, init: RequestInit, receive: (text
       } catch (error) { fail(error) }
     }
     try {
+      if (init.signal?.aborted) { abort(); return }
+      init.signal?.addEventListener('abort', abort)
       xhr.open(init.method || 'POST', url, true)
       xhr.responseType = 'text'
       xhr.withCredentials = false

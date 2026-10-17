@@ -1,7 +1,8 @@
 import { ApiError } from './errors'
-import { authRequest, accessToken } from './supabase'
+import { authRequest, accessToken, type AuthContext } from './supabase'
 import { clearToken, saveSession, Session } from './storage'
 import type { User } from '../types/api'
+import { isRejectedUserAccessCode } from './supabaseAuthCode'
 async function acceptSession(result: Session) {
   if (!result.access_token || !result.refresh_token || !result.user?.id) throw new Error('请先完成邮箱验证')
   await saveSession(result)
@@ -13,11 +14,12 @@ export async function signIn(email: string, password: string) {
 export async function signUp(email: string, password: string) {
   return acceptSession(await authRequest<Session>('/signup', { email: email.trim(), password }))
 }
-export async function fetchMe() {
-  try { return await authRequest<User>('/user', undefined, await accessToken()) }
+export async function fetchMe(context?: AuthContext) {
+  try { return await authRequest<User>('/user', undefined, await accessToken(false, context?.expectedOwner, context), undefined, context) }
   catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 401) throw error
-    return authRequest<User>('/user', undefined, await accessToken(true))
+    if (!(error instanceof ApiError) || !(error.status === 401 || error.status === 403 && isRejectedUserAccessCode(error.details?.code))) throw error
+    context?.guard()
+    return authRequest<User>('/user', undefined, await accessToken(true, context?.expectedOwner, context), undefined, context)
   }
 }
 export async function requestRegistration(email: string, password: string) {

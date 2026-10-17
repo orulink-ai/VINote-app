@@ -6,9 +6,10 @@ function publicHost(host) {
 }
 function validateDeployment(config) {
   if (!['lan', 'public'].includes(config.channel)) throw new Error('未知部署通道')
-  for (const key of ['apiBaseUrl', 'authBaseUrl']) {
+  for (const key of ['apiBaseUrl', 'authBaseUrl', ...(config.integrationBaseUrl ? ['integrationBaseUrl'] : [])]) {
     const url = new URL(config[key])
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error(`${key} 必须是无凭证的服务 Origin`)
+    const validPath = url.pathname === '/' || (key === 'integrationBaseUrl' && /^\/vinote-api\/?$/.test(url.pathname))
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || !validPath) throw new Error(`${key} 必须是无凭证的服务地址，集成服务仅允许 /vinote-api 前缀`)
     if (key === 'authBaseUrl' && url.protocol !== 'https:') throw new Error('账号入口必须使用 HTTPS')
     if (config.channel === 'public' && (url.protocol !== 'https:' || !publicHost(url.hostname))) throw new Error('公网包必须配置 HTTPS 公网域名（不接受 IP 或保留域名）')
   }

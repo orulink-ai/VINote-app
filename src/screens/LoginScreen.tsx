@@ -1,5 +1,6 @@
+import { Text } from '../components/AppText'
 import React, { useEffect, useState } from 'react'
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native'
 import { Field } from '../components/Field'
 import { PrimaryButton } from '../components/PrimaryButton'
 import { getAuthConfig, requestRegistration, signIn, signUp, verifyRegistration } from '../lib/auth'
@@ -83,8 +84,8 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
 const local = StyleSheet.create({
   content: { flexGrow: 1, paddingTop: 32, paddingBottom: 28, gap: 0 },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  brandName: { color: colors.ink, fontFamily: 'sans-serif', fontSize: 20, fontWeight: '700', letterSpacing: -0.4 },
-  form: { gap: 16, paddingTop: 56 },
+  brandName: { color: colors.ink, fontFamily: 'sans-serif', fontSize: 18, fontWeight: '500', letterSpacing: -0.4 },
+  form: { gap: 16, paddingTop: 40 },
   fields: { gap: 16, paddingTop: 8 },
   forgot: { alignSelf: 'flex-end', marginTop: -8 },
   footer: { marginTop: 'auto', paddingTop: 24, alignItems: 'center' },

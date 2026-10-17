@@ -1,6 +1,7 @@
 import { apiJson } from '../src/lib/api'
 import { readAccountId } from '../src/lib/storage'
-import { loadModels } from '../src/lib/models'
+import Storage from '@react-native-async-storage/async-storage'
+import { loadModels, saveSelection } from '../src/lib/models'
 
 jest.mock('../src/lib/api', () => ({ apiJson: jest.fn() }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn() }))
@@ -70,4 +71,21 @@ test('expired model cache fetches again', async () => {
     expect((await loadModels())[0].runtimeStatus).toBe('unavailable')
     expect(apiJson).toHaveBeenCalledTimes(2)
   } finally { clock.mockRestore() }
+})
+
+test('explicit selection save refreshes catalog and accepts only expired transient', async () => {
+  jest.mocked(readAccountId).mockResolvedValue('account-selection')
+  const selection = { asr_model: 'asr-1', llm_model: 'llm-1' }
+  jest.mocked(apiJson).mockResolvedValue({ data: [
+    { id: 'asr-1', modelType: 'asr', runtimeStatus: 'not_available', availability: { status: 'rate_limited', retryAt: Date.now() - 1 } },
+    { id: 'llm-1', modelType: 'llm', runtimeStatus: 'available' },
+  ] } as never)
+  await expect(saveSelection(selection)).resolves.toEqual(selection)
+  jest.mocked(apiJson).mockResolvedValue({ data: [
+    { id: 'asr-1', modelType: 'asr', runtimeStatus: 'not_available', availability: { status: 'quota_exhausted', retryAt: 1 } },
+    { id: 'llm-1', modelType: 'llm', runtimeStatus: 'available' },
+  ] } as never)
+  await expect(saveSelection({ ...selection, asr_model: 'asr-1' })).rejects.toThrow('所选模型不可用')
+  expect(JSON.parse((await Storage.getItem('vinote:account-selection:models'))!)).toEqual(selection)
+  expect(apiJson).toHaveBeenCalledTimes(2)
 })

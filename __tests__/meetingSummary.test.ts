@@ -9,6 +9,23 @@ const options = () => ({ guard: jest.fn(async () => {}), progress: jest.fn(), sa
 
 beforeEach(() => jest.mocked(chatCompletion).mockReset())
 
+test.each([0, 1])('old v10 facts:%i cannot replace the full source or mutate its checkpoint', async savedIndex => {
+  const source = 'synthetic evidence '.repeat(500)
+  const checkpoint: SummaryCheckpoint = { version: 10, source, model: 'frozen-llm', title: 'synthetic meeting',
+    parts: { [`facts:${savedIndex}`]: 'retained old facts', draft: 'old draft', audit: 'old audit' } }
+  const before = JSON.stringify(checkpoint), state = options()
+  jest.mocked(chatCompletion).mockResolvedValue(answer('synthetic complete answer') as never)
+  await summarize(source, checkpoint.title, checkpoint.model, { ...state, checkpoint })
+  expect(chatCompletion).toHaveBeenCalledTimes(2)
+  for (const [, messages] of jest.mocked(chatCompletion).mock.calls) {
+    expect(messages[1].content).toContain(source)
+    expect(messages[1].content).not.toContain('retained old facts')
+  }
+  expect(state.save).toHaveBeenLastCalledWith(expect.objectContaining({ version: 11,
+    parts: { draft: 'synthetic complete answer', audit: 'synthetic complete answer' } }))
+  expect(JSON.stringify(checkpoint)).toBe(before)
+})
+
 test('short transcript drafts directly and audits against the original evidence', async () => {
   jest.mocked(chatCompletion).mockResolvedValueOnce(answer('# 初稿') as never).mockResolvedValueOnce(answer('# 修订纪要') as never)
   const source = '[录音第 0 分钟起]\n讨论了 16 kHz 采样；没有形成决定。'
@@ -20,17 +37,17 @@ test('short transcript drafts directly and audits against the original evidence'
   expect(request(0).messages[0].content).toContain('没有就完全省略')
   expect(request(0).messages[0].content).toContain('不设字数目标')
   expect(state.save).toHaveBeenCalledTimes(2)
-  expect(state.save).toHaveBeenLastCalledWith(expect.objectContaining({ version: 8, parts: { draft: '# 初稿', audit: '# 修订纪要' } }))
+  expect(state.save).toHaveBeenLastCalledWith(expect.objectContaining({ version: 11, parts: { draft: '# 初稿', audit: '# 修订纪要' } }))
 })
 
-test('version 7 prompt checkpoint is invalidated while version 8 resumes a saved draft', async () => {
+test('version 10 prompt checkpoint is invalidated while version 11 resumes a saved full draft', async () => {
   const source = '[录音第 0 分钟起]\n讨论测试。'
   jest.mocked(chatCompletion).mockResolvedValue(answer('# 新输出') as never)
-  await summarize(source, '会议', 'llm', { ...options(), checkpoint: { version: 7, model: 'llm', title: '会议', source, parts: { draft: '旧稿', audit: '旧稿' } } as never })
+  await summarize(source, '会议', 'llm', { ...options(), checkpoint: { version: 10, model: 'llm', title: '会议', source, parts: { draft: '旧稿', audit: '旧稿' } } as never })
   expect(chatCompletion).toHaveBeenCalledTimes(2)
   jest.mocked(chatCompletion).mockClear()
   const state = options()
-  const result = await summarize(source, '会议', 'llm', { ...state, checkpoint: { version: 8, model: 'llm', title: '会议', source, parts: { draft: '# 已存初稿' } } })
+  const result = await summarize(source, '会议', 'llm', { ...state, checkpoint: { version: 11, model: 'llm', title: '会议', source, parts: { draft: '# 已存初稿' } } })
   expect(result).toBe('# 新输出')
   expect(chatCompletion).toHaveBeenCalledTimes(1)
   expect(request(0).messages[1].content).toContain('# 已存初稿')
@@ -57,27 +74,22 @@ test('long evidence is split at 6000 characters with recording offsets retained'
   expect(parts.join('\n\n').replace(/\s/g, '')).toBe(source.replace(/\s/g, ''))
 })
 
-test('long facts run with at most two requests, persist independently, then draft and audit', async () => {
+test('long source is sent whole in two sequential draft and audit requests', async () => {
   let active = 0; let peak = 0
   jest.mocked(chatCompletion).mockImplementation(async (_model, messages) => {
-    const body = { messages }
-    const system: string = body.messages[0].content
-    if (system.includes('逐段提取')) {
-      active++; peak = Math.max(active, peak)
-      await new Promise<void>(resolve => setTimeout(resolve, 5))
-      active--
-      return answer('- [录音第 0 分钟起] 16 kHz 测试条件') as never
-    }
-    return answer(system.includes('核查初稿') ? '# 核查完成' : '# 初稿') as never
+    active++; peak = Math.max(active, peak)
+    await new Promise<void>(resolve => setTimeout(resolve, 1))
+    active--
+    return answer(messages[0].content.includes('核查初稿') ? '# 核查完成' : '# 初稿') as never
   })
   const source = Array.from({ length: 8 }, (_, index) => `[录音第 ${index} 分钟起]\n${'讨论 16 kHz 条件和不同意见。'.repeat(100)}`).join('\n\n')
   const state = options()
   expect(await summarize(source, '方案讨论', 'llm', state)).toBe('# 核查完成')
-  expect(peak).toBe(2)
-  const factCount = jest.mocked(chatCompletion).mock.calls.filter((_, index) => request(index).messages[0].content.includes('逐段提取')).length
-  expect(factCount).toBeGreaterThan(1)
-  expect(state.save).toHaveBeenCalledTimes(factCount + 2)
-  expect(request(factCount + 1).messages[1].content).toContain('16 kHz 测试条件')
+  expect(peak).toBe(1)
+  expect(chatCompletion).toHaveBeenCalledTimes(2)
+  expect(state.save).toHaveBeenCalledTimes(2)
+  expect(request(0).messages[1].content).toContain(source)
+  expect(request(1).messages[1].content).toContain(source)
 })
 
 test('truncated output fails without caching or auditing and guard protects save', async () => {
@@ -93,28 +105,23 @@ test('account change after a model reply prevents checkpoint writes and the audi
   jest.mocked(chatCompletion).mockResolvedValue(answer('# 初稿') as never)
   let checks = 0
   const state = options()
-  state.guard.mockImplementation(async () => { if (++checks >= 3) throw new Error('账号已切换') })
+  state.guard.mockImplementation(async () => { if (++checks >= 2) throw new Error('账号已切换') })
   await expect(summarize('短转写', '会议', 'llm', state)).rejects.toThrow('账号已切换')
   expect(chatCompletion).toHaveBeenCalledTimes(1)
   expect(state.save).not.toHaveBeenCalled()
 })
 
-test('oversized fact material merges with bounded concurrency and resumes saved merge parts', async () => {
-  jest.mocked(chatCompletion).mockImplementation(async (_model, messages) => {
-    const body = { messages }
-    const system: string = body.messages[0].content
-    if (system.includes('逐段提取')) return answer('一条事实含偏移、数字和条件。'.repeat(400)) as never
-    if (system.includes('合并重复事实')) return answer('- [录音第 0 分钟起] 保留 16 kHz 条件') as never
-    return answer(system.includes('核查初稿') ? '# 最终纪要' : '# 初稿') as never
-  })
+test('large full-source completed v11 summary reuses saved draft and audit without requests', async () => {
+  jest.mocked(chatCompletion).mockImplementation(async (_model, messages) =>
+    answer(messages[0].content.includes('核查初稿') ? '# 最终纪要' : '# 初稿') as never)
   const source = '[录音第 0 分钟起]\n' + '讨论事实、条件及不同意见。'.repeat(1600)
   const state = options()
   expect(await summarize(source, '会议', 'llm', state)).toBe('# 最终纪要')
-  const all = jest.mocked(chatCompletion).mock.calls.map((_, index) => request(index))
-  expect(all.some(item => item.messages[0].content.includes('合并重复事实'))).toBe(true)
-  expect(all.at(-1)!.messages[1].content).toContain('16 kHz 条件')
+  expect(chatCompletion).toHaveBeenCalledTimes(2)
+  expect(request(1).messages[1].content).toContain(source)
   const saved = state.save.mock.calls.at(-1)![0]
-  expect(Object.keys(saved.parts).some(key => key.startsWith('merge:0:'))).toBe(true)
+  expect(saved.version).toBe(11)
+  expect(Object.keys(saved.parts).sort()).toEqual(['audit', 'draft'])
   jest.mocked(chatCompletion).mockClear()
   expect(await summarize(source, '会议', 'llm', { ...options(), checkpoint: saved })).toBe('# 最终纪要')
   expect(chatCompletion).not.toHaveBeenCalled()
