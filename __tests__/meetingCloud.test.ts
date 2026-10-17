@@ -1,111 +1,10 @@
 import { chatCompletion } from '../src/lib/chatCompletion'
-import { NativeModules } from 'react-native'
-import FS from 'react-native-fs'
-import { apiJson, ApiError } from '../src/lib/api'
-import { TransportError } from '../src/lib/errors'
-import { transcribe, summarize, splitTranscript, splitMeetingEvidence, TranscriptionCheckpoint } from '../src/lib/meetingCloud'
-jest.mock('../src/lib/api', () => ({ apiJson: jest.fn(), ApiError: jest.requireActual('../src/lib/errors').ApiError }))
+import { summarize, splitTranscript, splitMeetingEvidence } from '../src/lib/meetingCloud'
+jest.mock('../src/lib/asrStream', () => ({ recognizeInterval: jest.fn(), ASRSessionLimit: class extends Error {} }))
 jest.mock('../src/lib/chatCompletion', () => ({ chatCompletion: jest.fn() }))
-beforeEach(() => {
-  jest.clearAllMocks()
-  NativeModules.MeetingAudio = { toWav: jest.fn(async () => 'file:///cache/asr-full.wav'), wavInfo: jest.fn(async () => 130), wavChunk: jest.fn(async (_uri, index) => `file:///cache/asr-${index}.wav`) }
-  jest.mocked(FS.stat).mockResolvedValue({ size: 10000, mtime: new Date(1700000000000) } as never)
-  FS.unlink = jest.fn(async () => {})
-})
+beforeEach(() => { jest.clearAllMocks() })
 afterEach(() => { jest.useRealTimers() })
 
-test('retries transient transport failure without repeating saved chunks', async () => {
-  jest.useFakeTimers()
-  jest.mocked(apiJson).mockReset()
-  jest.mocked(apiJson).mockRejectedValueOnce(new TransportError('timeout')).mockResolvedValueOnce({ text: '最后一段' })
-  const progress = jest.fn()
-  const save = jest.fn(async () => {})
-  const operation = transcribe('file:///original.m4a', 'asr', { checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['一', '二'] }, guard: async () => {}, progress, save })
-  await jest.runAllTimersAsync()
-  await expect(operation).resolves.toContain('最后一段')
-  expect(apiJson).toHaveBeenCalledTimes(2)
-  expect(NativeModules.MeetingAudio.wavChunk).toHaveBeenCalledTimes(1)
-  expect(save).toHaveBeenCalledWith(expect.objectContaining({ parts: ['一', '二', '最后一段'] }))
-  expect(progress).toHaveBeenCalledWith(expect.stringContaining('1/2'))
-})
-
-test('transport retries are bounded and preserve previous checkpoints', async () => {
-  jest.useFakeTimers()
-  jest.mocked(apiJson).mockReset()
-  jest.mocked(apiJson).mockRejectedValue(new TransportError('timeout'))
-  const save = jest.fn(async () => {})
-  const operation = transcribe('file:///original.m4a', 'asr', { checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['一', '二'] }, guard: async () => {}, progress: jest.fn(), save })
-  const assertion = expect(operation).rejects.toThrow('timeout')
-  await jest.runAllTimersAsync()
-  await assertion
-  expect(apiJson).toHaveBeenCalledTimes(3)
-  expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ parts: expect.arrayContaining([null]) }))
-  jest.mocked(apiJson).mockReset()
-})
-test('resumes completed chunks, saves silent sections and removes only temporary WAVs', async () => {
-  jest.mocked(apiJson).mockResolvedValueOnce({ text: '' }).mockResolvedValueOnce({ text: '最后一段' })
-  const checkpoints: TranscriptionCheckpoint[] = []
-  const result = await transcribe('file:///original.m4a', 'asr', { checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['第一段'] }, guard: async () => {}, progress: jest.fn(), save: async value => { checkpoints.push(value) } })
-  expect(NativeModules.MeetingAudio.wavChunk.mock.calls.map((args: unknown[]) => args[1])).toEqual([1, 2])
-  expect(checkpoints.at(-1)?.parts).toEqual(['第一段', '', '最后一段'])
-  expect(result).toContain('最后一段')
-  expect(FS.unlink).not.toHaveBeenCalledWith('/original.m4a')
-})
-test.each(['Aliyun ASR returned an empty transcript.', 'Volcengine ASR returned an empty transcript.'])(
-  'continues after an explicitly empty ASR chunk: %s', async message => {
-    jest.mocked(apiJson).mockReset().mockRejectedValueOnce(new ApiError(message, 502)).mockResolvedValueOnce({ text: '后续语音' })
-    const save = jest.fn(async () => {})
-    const result = await transcribe('file:///original.m4a', 'asr', {
-      checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['此前语音'] },
-      guard: async () => {}, progress: jest.fn(), save,
-    })
-    expect(result).toContain('后续语音')
-    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ parts: ['此前语音', '', '后续语音'] }))
-    expect(apiJson).toHaveBeenCalledTimes(2)
-  },
-)
-test('does not treat other ASR gateway errors as silent audio', async () => {
-  jest.useFakeTimers()
-  jest.mocked(apiJson).mockReset().mockRejectedValue(new ApiError('Volcengine ASR disconnected before its final result', 502))
-  const save = jest.fn(async () => {})
-  const operation = transcribe('file:///original.m4a', 'asr', {
-    checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['此前语音', '其他语音'] },
-    guard: async () => {}, progress: jest.fn(), save,
-  })
-  const assertion = expect(operation).rejects.toThrow('Volcengine ASR disconnected before its final result')
-  await jest.runAllTimersAsync()
-  await assertion
-  expect(apiJson).toHaveBeenCalledTimes(3)
-  expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ parts: expect.arrayContaining([null]) }))
-})
-test('reports no recognizable speech when every provider chunk is explicitly empty', async () => {
-  jest.mocked(apiJson).mockReset().mockRejectedValue(new ApiError('Volcengine ASR returned an empty transcript.', 502))
-  const save = jest.fn(async () => {})
-  await expect(transcribe('file:///original.m4a', 'asr', {
-    guard: async () => {}, progress: jest.fn(), save,
-  })).rejects.toThrow('未识别到有效语音')
-  expect(save).toHaveBeenCalledTimes(4)
-  expect(apiJson).toHaveBeenCalledTimes(3)
-})
-test('retains completed chunks when a later request fails', async () => {
-  jest.mocked(apiJson).mockResolvedValueOnce({ text: '已完成' }).mockRejectedValueOnce(new Error('offline'))
-  const save = jest.fn(async () => {})
-  await expect(transcribe('file:///original.m4a', 'asr', { guard: async () => {}, progress: jest.fn(), save })).rejects.toThrow('offline')
-  expect(save).toHaveBeenCalledTimes(2)
-  expect(save).toHaveBeenCalledWith(expect.objectContaining({ parts: ['已完成', null, null] }))
-})
-
-test('saved completion updates audio coverage including the short final chunk and measures wall time', async () => {
-  jest.mocked(apiJson).mockReset().mockResolvedValue({ text: '末段' })
-  const progress = jest.fn()
-  const timing = jest.fn()
-  await transcribe('file:///original.m4a', 'asr', {
-    checkpoint: { version: 2, model: 'asr', duration: 130, parts: ['第一段', '第二段'] },
-    guard: async () => {}, progress, timing, save: async () => {},
-  })
-  expect(progress).toHaveBeenCalledWith('转写已保存 3/3 段 · 130/130 秒 · 100%')
-  expect(timing).toHaveBeenCalledWith(expect.objectContaining({ stage: 'transcription', durationMs: expect.any(Number) }))
-})
 test('splitting preserves every character and bounds each summary input', () => {
   const text = '会议讨论。'.repeat(5000)
   const parts = splitTranscript(text)
@@ -124,7 +23,7 @@ test('evidence chunks retain the recording offset for every section', () => {
   expect(continuations.length).toBeGreaterThan(1)
   expect(continuations.every(part => part.startsWith('[录音第 12 分钟起]') && part.length <= 1000)).toBe(true)
 })
-test('a 28-minute meeting extracts timestamped facts before drafting and auditing', async () => {
+test('a 28-minute meeting sends all timestamped evidence directly to draft and audit', async () => {
   jest.mocked(chatCompletion).mockReset().mockImplementation(async (_model, messages) => {
     const request = { model: _model, messages }
     const system: string = request.messages[0].content
@@ -136,7 +35,9 @@ test('a 28-minute meeting extracts timestamped facts before drafting and auditin
   const save = jest.fn(async () => {})
   const result = await summarize(transcript, '语音键盘会议', 'llm', { guard: async () => {}, progress: jest.fn(), save })
   const requests = jest.mocked(chatCompletion).mock.calls.map(([model, messages]) => ({ model, messages }))
-  expect(requests.filter(request => request.messages[0].content.includes('逐段提取')).length).toBeGreaterThan(1)
+  expect(requests).toHaveLength(2)
+  expect(requests.every(request => request.messages[1].content.includes(transcript))).toBe(true)
+  expect(requests.filter(request => request.messages[0].content.includes('逐段提取'))).toHaveLength(0)
   expect(requests.some(request => request.messages[0].content.includes('核查初稿'))).toBe(true)
   expect(requests.filter(request => request.messages[0].content.includes('逐段提取')).every(request => request.messages[0].content.includes('不限于决策'))).toBe(true)
   expect(requests.every(request => request.model === 'llm')).toBe(true)

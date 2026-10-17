@@ -27,8 +27,8 @@ export async function timedFetch(url: string, init: RequestInit, timeout = 60000
     if (__DEV__) console.warn('[VINote] network request failed', new URL(url).host,
       error instanceof Error ? `${error.name}: ${error.message}` : String(error))
     throw new TransportError(url.includes('/auth/v1/')
-      ? '账号服务连接失败，请确认当前 Wi-Fi 的账号网络通道可用后重试。'
-      : '会议服务连接失败或请求超时，请稍后重试。原始录音仍保留在本机。')
+      ? '账号服务暂时无法连接，请检查网络后重试。'
+      : '连接失败或请求超时，请稍后重试。已保存内容仍保留。')
   }
   finally { clearTimeout(timer) }
 }

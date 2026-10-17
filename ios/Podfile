@@ -15,6 +15,8 @@ if linkage != nil
 end
 
 target 'VINoteApp' do
+  Pod::Executable.execute_command('node', ['../scripts/prepare-speaker-models.cjs', '--ios'])
+  pod 'VINoteSpeakers', :path => '.'
   config = use_native_modules!
 
   use_react_native!(

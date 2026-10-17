@@ -1,10 +1,13 @@
+import type { AsrProgress } from './asrProgress'
+import type { SpeakerProgress } from './speakerProgress'
 import { ApiError, TransportError } from './errors'
 
 export type ProcessingTiming = { stage: string; durationMs: number; index?: number; cacheHit?: boolean; bytes?: number }
 export type ProcessingOptions<T> = {
+  asrProgress?: (value: AsrProgress) => void
   owner?: string
   checkpoint?: T
-  progress: (text: string) => void
+  progress: (text: string, detail?: SpeakerProgress) => void
   save: (checkpoint: T) => Promise<void>
   guard: () => Promise<void>
   timing?: (event: ProcessingTiming) => void

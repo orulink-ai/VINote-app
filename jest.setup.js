@@ -12,3 +12,8 @@ jest.mock('@react-native-async-storage/async-storage', () => {
   const values = new Map();
   return { getItem: jest.fn(async key => values.get(key) || null), setItem: jest.fn(async (key, value) => { values.set(key, value) }), removeItem: jest.fn(async key => { values.delete(key) }), getAllKeys: jest.fn(async () => [...values.keys()]) };
 });
+
+// Business-state tests use the system reduced-motion preference. Native motion is
+// verified on device; do not leave animation timers in asynchronous act() calls.
+const { AccessibilityInfo } = require('react-native');
+jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(true);

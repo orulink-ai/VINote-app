@@ -22,6 +22,16 @@ gradle.taskGraph.whenReady { graph ->
 }
 
 def deployment = new groovy.json.JsonSlurper().parse(file("../../config/deployment.json"))
+def checkReleaseContentService = {
+    providers.exec {
+        workingDir rootProject.projectDir.parentFile
+        commandLine 'node', 'scripts/validate-deployment.cjs', '--require-generation'
+    }.result.get().assertNormalExitValue()
+}
+if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }) checkReleaseContentService()
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.project == project && it.name.toLowerCase().contains('release') }) checkReleaseContentService()
+}
 def requestedChannel = project.findProperty('vinoteChannel')
 if (requestedChannel && requestedChannel != (deployment.channel == 'lan' ? 'test' : 'public')) {
     throw new GradleException('Selected deployment does not match requested VINote channel')
@@ -113,15 +123,17 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace "com.vinoteapp"
+    sourceSets.main.assets.srcDir "../../assets"
     defaultConfig {
         applicationId "com.vinoteapp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 8
-        versionName "0.1.3"
+        versionCode 9
+        versionName "0.2.0"
         buildConfigField "String", "ACCOUNT_PROXY_HOST", groovy.json.JsonOutput.toJson(deployment.accountProxyHost)
         buildConfigField "int", "ACCOUNT_PROXY_PORT", deployment.accountProxyPort.toString()
         buildConfigField 'boolean', 'VINOTE_STANDALONE', project.hasProperty('vinoteStandalone') ? 'true' : 'false'
+        buildConfigField 'String', 'VINOTE_ASR_ORIGIN', groovy.json.JsonOutput.toJson(deployment.apiBaseUrl)
     }
     buildTypes.each { buildType ->
         buildType.manifestPlaceholders.usesCleartextTraffic = deployment.channel == 'lan'
@@ -158,7 +170,17 @@ android {
     }
 }
 
+tasks.register('prepareSpeakerModels', Exec) {
+    workingDir rootProject.projectDir.parentFile
+    commandLine 'node', 'scripts/prepare-speaker-models.cjs'
+}
+tasks.named('preBuild').configure { dependsOn 'prepareSpeakerModels' }
+
+repositories {
+    maven { url 'https://xdcobra.github.io/maven'; content { includeGroup 'com.xdcobra.sherpa' } }
+}
 dependencies {
+    implementation("com.xdcobra.sherpa:sherpa-onnx:1.12.35-1")
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 

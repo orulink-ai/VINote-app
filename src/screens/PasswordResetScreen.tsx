@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react'
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text } from 'react-native'
+import { Text } from '../components/AppText'
+import React, { useEffect, useRef, useState } from 'react'
+import { Alert, BackHandler, KeyboardAvoidingView, Platform, ScrollView} from 'react-native'
+import { ScreenHeader } from '../components/ScreenHeader'
 import { Field } from '../components/Field'
 import { PrimaryButton } from '../components/PrimaryButton'
 import { requestPasswordReset, resetPassword } from '../lib/auth'
@@ -12,6 +14,15 @@ export function PasswordResetScreen({ onBack }: { onBack: () => void }) {
   const [confirmation, setConfirmation] = useState('')
   const [sent, setSent] = useState(false)
   const [loading, setLoading] = useState(false)
+  const busy = useRef(false)
+  const returnToLogin = () => { if (!busy.current) onBack() }
+  useEffect(() => {
+    const listener = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!busy.current) onBack()
+      return true
+    })
+    return () => listener.remove()
+  }, [onBack])
   const [cooldown, setCooldown] = useState(0)
   useEffect(() => {
     if (!cooldown) return
@@ -19,9 +30,10 @@ export function PasswordResetScreen({ onBack }: { onBack: () => void }) {
     return () => clearTimeout(timer)
   }, [cooldown])
   const send = async () => {
+    if (busy.current || cooldown > 0) return
     const address = email.trim().toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return Alert.alert('邮箱无效', '请输入注册时使用的邮箱。')
-    setLoading(true)
+    busy.current = true; setLoading(true)
     try {
       const result = await requestPasswordReset(address)
       setEmail(address)
@@ -29,23 +41,24 @@ export function PasswordResetScreen({ onBack }: { onBack: () => void }) {
       setCooldown(60)
       Alert.alert('查收邮件', result.message)
     } catch (error) { Alert.alert('发送失败', error instanceof Error ? error.message : '请稍后重试') }
-    finally { setLoading(false) }
+    finally { busy.current = false; setLoading(false) }
   }
   const submit = async () => {
+    if (busy.current) return
     if (!/^[0-9]{6,10}$/.test(code)) return Alert.alert('验证码无效', '请输入邮件中的验证码。')
     if (password.length < 6 || password.length > 128) return Alert.alert('密码不符合要求', '请输入 6 至 128 位新密码。')
     if (password !== confirmation) return Alert.alert('密码不一致', '请检查两次输入的新密码。')
-    setLoading(true)
+    busy.current = true; setLoading(true)
     try {
       await resetPassword(email, code, password)
       Alert.alert('密码已重置', '请使用新密码登录，手机与桌面端使用同一密码。')
       onBack()
     } catch (error) { Alert.alert('重置失败', error instanceof Error ? error.message : '请稍后重试') }
-    finally { setLoading(false) }
+    finally { busy.current = false; setLoading(false) }
   }
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <ScreenHeader title="账号安全" onBack={returnToLogin} disabled={loading} backLabel="返回登录" />
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, styles.loginContent]}>
-      <Text style={styles.eyebrow}>账号安全</Text>
       <Text style={styles.title}>重置密码</Text>
       <Text style={[styles.subtitle, { marginBottom: 18 }]}>通过注册邮箱验证身份，设置新的 VINote 账号密码。</Text>
       <Field label="邮箱" value={email} onChangeText={setEmail} editable={!sent && !loading} keyboardType="email-address" autoCorrect={false} placeholder="you@example.com" />
@@ -56,7 +69,8 @@ export function PasswordResetScreen({ onBack }: { onBack: () => void }) {
         <PrimaryButton title="确认重置密码" loading={loading} disabled={loading} onPress={submit} />
       </>}
       <PrimaryButton title={sent ? (cooldown ? cooldown + ' 秒后可重新发送' : '重新发送验证码') : '发送重置验证码'} loading={loading && !sent} disabled={loading || cooldown > 0} onPress={send} />
-      <PrimaryButton secondary title="返回登录" disabled={loading} onPress={onBack} />
+      {loading && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>正在处理账号请求，请完成后返回登录。</Text>}
+      <PrimaryButton secondary title="返回登录" disabled={loading} onPress={returnToLogin} />
     </ScrollView>
   </KeyboardAvoidingView>
 }

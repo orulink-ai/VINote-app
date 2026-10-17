@@ -43,12 +43,13 @@ npm 脚本会自动选择对应配置。直接运行 Gradle 前需先选择通�
 
 在 Mac 上执行 `npm ci`、`bundle install`、`cd ios && bundle exec pod install`，再打开 `ios/VINoteApp.xcworkspace`。开发可在仓库根目录执行 `npm run ios` 并运行 Metro；真机需要在 Xcode 中选择开发团队和签名配置。
 
-正式版归档前执行 `npm run config:public` 和 `npm run config:check`；测试版归档前执行 `npm run config:test` 和 `npm run config:check`，在 Xcode 选择真实设备/通用 iOS 设备、Release 和 Product → Archive，再通过 Organizer 按证书配置导出或分发。没有在 Windows 生成可安装 IPA 的脚本；尚无已验证的 iOS Release 产物。音频、导入、后台录音、局域网权限、ATS 和登录直连需在 Mac/iPhone 上验收，不能根据 Android 结果承诺可用。
+正式版归档前执行 `npm run config:public` 和 `npm run config:check:release`；测试版归档前执行 `npm run config:test` 和 `npm run config:check`，在 Xcode 选择真实设备/通用 iOS 设备、Release 和 Product → Archive，再通过 Organizer 按证书配置导出或分发。没有在 Windows 生成可安装 IPA 的脚本；尚无已验证的 iOS Release 产物。音频、导入、后台录音、局域网权限、ATS 和登录直连需在 Mac/iPhone 上验收，不能根据 Android 结果承诺可用。
 
 ## 部署配置与公网
 
 - `channel`：`lan` 或 `public`。
 - `apiBaseUrl`：VILab 服务 Origin，不含路径、查询、凭证；客户端追加各 API 路径。
+- `generationBaseUrl`：显式 VINote 内容服务 HTTPS Base URL，可带反向代理前缀。public 为 `https://supabase-vinote.orulink.ai/vinote-api`，共址不等于自动启用；需要 Bearer capabilities 协议1。普通 Metro Debug 仍用 loopback，standalone 内置 bundle dev=false 使用此地址。不得配置 VILab 模型入口；缺失时 Release 打包失败。详见 [内容服务](content-service.md)。
 - `authBaseUrl`：HTTPS 账号入口 Origin，须保留 `/auth/v1`、Supabase 项目及认证行为；项目公开 publishable key 位于 `src/config/env.ts`，不能替换为 service_role 密钥。
 - `accountProxyHost` / `accountProxyPort`：Android 账号 CONNECT 出口；端口为 1–65535 的整数。公网通道主机必须为空字符串，端口仍保留有效整数。
 
@@ -63,3 +64,13 @@ npm 脚本会自动选择对应配置。直接运行 Gradle 前需先选择通�
 `npm run config:check`、`npm run test:scripts`、`npm test -- --runInBand`、`npm run typecheck` 分别验证配置、脚本回归、应用单测及类型。原生构建和真机验收是独立检查。后台采集与前台生成不是同一能力。不要提交 APK、音频、转写、令牌、私钥或私人截图。
 
 Gradle 插件还需要可发现的 JDK 17 工具链。若已安装但未被发现，设置用户级 ~/.gradle/gradle.properties 的 org.gradle.java.installations.paths 指向该安装目录；无需重复下载 JDK。审查时 standalone Gradle 任务图检查通过，正式无签名构建被拒绝；未重新产出 APK 或验证生产签名包。
+
+## 本轮 public standalone 准备
+
+先执行 `npm run config:public`、`npm run config:check:release`。主线程可复用原 App 构建缓存，运行 `assembleDebug -PvinoteChannel=public -PvinoteStandalone=true --max-workers=1 --no-daemon`，使用既有 JVM768/Node384 资源预算。既有 MainApplication 关闭该包的 dev support，Gradle bundler 对非 debuggableVariants 的包设置 devEnabled=false，因此内置 JS 使用 generationBaseUrl，而普通 Metro 热更新不变。没有新增 native API。
+
+保持 `com.vinoteapp.dev` 及兼容签名，只覆盖安装，不卸载或清数据；本代理未执行构建、安装或操作设备。正式 Release 缺发布签名凭证时不构建、不回退调试签名。无推理验收只打开导入页核对就绪/失败重试，以及已有笔记查看、编辑保存和重开；不要点击生成、重试生成或录音处理。本地 TypeScript/Jest、GitHub CI、runtime 部署、实际安装包均是独立证据。
+
+## B站设备音频下载原生变更
+
+本轮MeetingFiles新增bilibiliDownloadProtocol=1及start/cancel/releaseBilibiliDownload，另有专用policy/downloader源码。需重建匹配AndroidAPK，不能仅替换JS。沿用public standalone缓存构建与兼容签名覆盖安装，保留com.vinoteapp.dev数据；iOS没有对应native路径。离线编译：python scripts/check-bilibili-native-offline.py，只用已有缓存，不调用Gradle/网络/模型。实际包构建及设备只下载验收由主线程负责，再决定是否进行新样本首次推理；不可重试旧receipt。

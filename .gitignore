@@ -78,3 +78,8 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Build-prepared public speaker models (reproducible with prepare-speakers).
+/android/app/src/main/assets/speaker/*.onnx
+/ios/speaker-models/
+/ios/sherpa-runtime/

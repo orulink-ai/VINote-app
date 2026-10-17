@@ -29,6 +29,23 @@ const original = globalThis.XMLHttpRequest
 beforeEach(() => { FakeXHR.throwAt = undefined; globalThis.XMLHttpRequest = FakeXHR as never })
 afterEach(() => { globalThis.XMLHttpRequest = original })
 
+test('gate cancellation aborts the native stream and removes listeners without accepting partial output', async () => {
+  const controller = new AbortController(), receive = jest.fn()
+  const request = requestTextStream('https://example.test/chat', { body: '{}', signal: controller.signal }, receive)
+  const xhr = FakeXHR.latest
+  controller.abort()
+  await expect(request).rejects.toBeInstanceOf(TransportError)
+  expect(xhr.abort).toHaveBeenCalledTimes(1)
+  expect(xhr.onprogress).toBeNull(); expect(xhr.onload).toBeNull()
+  expect(receive).not.toHaveBeenCalled()
+})
+
+test('an already closed gate signal prevents even the first stream send', async () => {
+  const controller = new AbortController(); controller.abort()
+  await expect(requestTextStream('https://example.test/chat', { body: '{}', signal: controller.signal }, jest.fn())).rejects.toBeInstanceOf(TransportError)
+  expect(FakeXHR.latest.send).not.toHaveBeenCalled()
+})
+
 test('incremental text arrives before load and final unread bytes arrive once', async () => {
   const receive = jest.fn()
   const result = requestTextStream('https://example.test/chat', { method: 'POST', headers: { Authorization: 'Bearer test' }, body: '{}' }, receive)

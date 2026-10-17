@@ -23,7 +23,7 @@
 - npm run typecheck：通过。
 - npm test -- --runInBand：27 suites、113 tests 全部通过。上述测试在真实回归失败之后修复，不声称新增测试先行。
 - 桌面 node scripts/dev.mjs --target desktop --environment public 已启动 API、Vite、Tauri；auth/session、notes、model-profiles 等请求返回 200。
-- 用户重启后，最终构建再次覆盖安装到 USB 设备 ABTMUT1C06010498，最后安装时间为 17:46:30；MainActivity 启动成功。8900、3100 端口持续监听。当前过滤的 ReactNativeJS/AndroidRuntime 错误日志为空；这不代表真实登录已通过。
+- 用户重启后，最终构建再次覆盖安装到 USB 设备 <device-serial>，最后安装时间为 17:46:30；MainActivity 启动成功。8900、3100 端口持续监听。当前过滤的 ReactNativeJS/AndroidRuntime 错误日志为空；这不代表真实登录已通过。
 - git diff --check：通过，仅提示 jest.setup.js 的工作区换行转换。
 - 手机请求成功和真实登录仍待用户操作；尚未确认新项目账号登录及模型链路完成。没有提交、推送、发布新版本。
 

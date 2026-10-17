@@ -1,0 +1,31 @@
+name: App offline checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: app-offline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies without native preparation
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate deployment configuration
+        run: npm run config:check
+      - name: Offline script tests
+        run: node --require ./scripts/offline-network.cjs --test scripts/*.test.cjs
+      - name: TypeScript
+        run: node --max-old-space-size=256 node_modules/typescript/bin/tsc --noEmit
+      - name: Offline Jest (one worker)
+        run: node --require ./scripts/offline-network.cjs --max-old-space-size=384 node_modules/jest/bin/jest.js --runInBand --watch=false --silent

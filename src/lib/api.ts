@@ -1,9 +1,11 @@
 import { API_BASE_URL } from '../config/env'
 import { Platform } from 'react-native'
 import { accessToken } from './supabase'
-import { ApiError, decodeResponse, timedFetch } from './errors'
+import { ApiError, decodeResponse } from './errors'
 import { readSession } from './storage'
 import { requestTextStream } from './textStream'
+import { remoteRequest } from './remoteRequest'
+import { assertRemoteScope, captureRemoteScope } from './sessionGate'
 export { ApiError } from './errors'
 async function authorize(init: RequestInit, expectedAccountId?: string) {
   const session = await readSession()
@@ -19,28 +21,45 @@ async function authorize(init: RequestInit, expectedAccountId?: string) {
   return { account, headers }
 }
 export async function apiFetch(path: string, init: RequestInit = {}, expectedAccountId?: string) {
-  const { account, headers } = await authorize(init, expectedAccountId)
-  let response = await timedFetch(`${API_BASE_URL}${path}`, { ...init, headers }, 360000)
+  const lifetime = remoteRequest(expectedAccountId, 360000)
+  try {
+  const { account, headers } = await authorize(init, expectedAccountId || lifetime.scope.owner)
+  lifetime.guard()
+  let response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, signal: lifetime.signal, credentials: 'omit' })
+  lifetime.guard()
   if (response.status === 401) {
-    headers.set('Authorization', `Bearer ${await accessToken(true, account)}`)
-    response = await timedFetch(`${API_BASE_URL}${path}`, { ...init, headers }, 360000)
+    headers.set('Authorization', `Bearer ${await accessToken(true, account, lifetime.context)}`)
+    lifetime.guard()
+    response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, signal: lifetime.signal, credentials: 'omit' })
+    lifetime.guard()
   }
   return response
+  } finally { lifetime.close() }
 }
 export async function apiJson<T>(path: string, init: RequestInit = {}, expectedAccountId?: string) {
-  return decodeResponse<T>(await apiFetch(path, init, expectedAccountId))
+  const scope = captureRemoteScope(expectedAccountId)
+  const value = await decodeResponse<T>(await apiFetch(path, init, expectedAccountId))
+  assertRemoteScope(scope); return value
 }
 export async function apiTextStream(path: string, init: RequestInit, receive: (text: string) => void, expectedAccountId?: string) {
-  const { account, headers } = await authorize(init, expectedAccountId)
+  const lifetime = remoteRequest(expectedAccountId, 900000)
+  try {
+  const { account, headers } = await authorize(init, expectedAccountId || lifetime.scope.owner)
+  lifetime.guard()
+  const guardedReceive = (text: string) => { lifetime.guard(); receive(text) }
   headers.set('Accept', 'text/event-stream')
-  let response = await requestTextStream(`${API_BASE_URL}${path}`, { ...init, headers }, receive)
+  let response = await requestTextStream(`${API_BASE_URL}${path}`, { ...init, headers, signal: lifetime.signal }, guardedReceive)
+  lifetime.guard()
   if (response.status === 401) {
-    headers.set('Authorization', `Bearer ${await accessToken(true, account)}`)
-    response = await requestTextStream(`${API_BASE_URL}${path}`, { ...init, headers }, receive)
+    headers.set('Authorization', `Bearer ${await accessToken(true, account, lifetime.context)}`)
+    lifetime.guard()
+    response = await requestTextStream(`${API_BASE_URL}${path}`, { ...init, headers, signal: lifetime.signal }, guardedReceive)
+    lifetime.guard()
   }
   if (response.status < 200 || response.status >= 300) {
     await decodeResponse({ status: response.status, ok: false, headers: new Headers(response.requestId ? { 'x-request-id': response.requestId } : {}),
       text: async () => response.text } as Response)
   }
   if (!response.contentType.toLowerCase().startsWith('text/event-stream')) throw new Error('总结服务未返回流式响应，请检查服务配置；转写已保存')
+  } finally { lifetime.close() }
 }

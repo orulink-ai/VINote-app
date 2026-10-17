@@ -9,10 +9,53 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.RejectedExecutionException
+import android.util.Base64
 
 /** 原音频只读，流式转换为 16kHz/mono/PCM16 WAV，避免整段音频进入内存。 */
 class MeetingAudioModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
   private val worker = Executors.newSingleThreadExecutor()
+  private val pcmReaders = PcmReaderStore(context.cacheDir, diagnostics =
+    if (BuildConfig.DEBUG) PcmReaderDiagnostics(true, { value ->
+      android.util.Log.i("VINotePCM", value.safeLine())
+    }) else null)
+  // Independent from conversion/speaker work. Bounded pending bridge operations.
+  private val pcmIO = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+    ArrayBlockingQueue<Runnable>(16), { task -> Thread(task, "VINotePCMIO") },
+    ThreadPoolExecutor.AbortPolicy())
+
+  private fun pcmNumber(value: Double): Long {
+    require(value.isFinite() && value >= 0 && value <= Int.MAX_VALUE && value == kotlin.math.floor(value))
+    return value.toLong()
+  }
+  private fun pcmWork(promise: Promise, work: () -> Any?) {
+    try { pcmIO.execute {
+      try { promise.resolve(work()) }
+      catch (_: Exception) { promise.reject("PCM_READER_FAILED", "PCM reader failed; original retained") }
+    } } catch (_: RejectedExecutionException) {
+      promise.reject("PCM_READER_BUSY", "PCM reader unavailable; original retained")
+    }
+  }
+  @ReactMethod fun openPcmReader(uri: String, start: Double, end: Double, promise: Promise) = pcmWork(promise) {
+    pcmReaders.open(Uri.parse(uri).path ?: uri, pcmNumber(start), pcmNumber(end))
+  }
+  @ReactMethod fun readPcmReader(handle: String, position: Double, bytes: Double, promise: Promise) = pcmWork(promise) {
+    Base64.encodeToString(pcmReaders.read(handle, pcmNumber(position), pcmNumber(bytes).toInt()), Base64.NO_WRAP)
+  }
+  @ReactMethod fun closePcmReader(handle: String, promise: Promise) {
+    // Never enqueue cleanup behind a full queue; synchronized reads are <=6400B.
+    try { pcmReaders.close(handle); promise.resolve(null) }
+    catch (_: Exception) { promise.reject("PCM_READER_CLOSE_FAILED", "PCM reader release unconfirmed") }
+  }
+  override fun invalidate() {
+    try { pcmReaders.dispose() }
+    finally { pcmIO.shutdown(); worker.shutdown(); super.invalidate() }
+    // Graceful shutdown preserves queued promises; PCM calls reject after disposal.
+    // Conversion work finishes normally, then its old-context executor terminates.
+  }
   override fun getName() = "MeetingAudio"
   @ReactMethod
   fun audioInfo(uri: String, promise: Promise) { worker.execute {
@@ -27,7 +70,7 @@ class MeetingAudioModule(private val context: ReactApplicationContext) : ReactCo
     } catch (e: Exception) { promise.reject("AUDIO_INFO", e.message, e) }
     finally { retriever.release() }
   } }
-  /** 只允许切分本模块生成的缓存；固定 60 秒上传块，与公网转写上限一致。 */
+  /** 只允许读取本模块生成的16kHz/mono/PCM16缓存。 */
   @ReactMethod
   fun wavInfo(uri: String, promise: Promise) { worker.execute {
     try {
@@ -68,13 +111,22 @@ class MeetingAudioModule(private val context: ReactApplicationContext) : ReactCo
   }
 
   @ReactMethod
-  fun wavChunk(uri: String, index: Double, promise: Promise) { worker.execute {
+  fun wavChunk(uri: String, index: Double, promise: Promise) = sliceWav(uri, index, 60, promise)
+
+  /** Aliyun已验证的12秒PCM WAV边界；保留旧60秒接口供其他模型使用。 */
+  @ReactMethod
+  fun wavChunk12(uri: String, index: Double, promise: Promise) = sliceWav(uri, index, 12, promise)
+
+  private fun sliceWav(uri: String, index: Double, seconds: Int, promise: Promise) { worker.execute {
     val output = File(context.cacheDir, "asr-${UUID.randomUUID()}.wav")
     try {
       require(index.isFinite() && index >= 0 && index == kotlin.math.floor(index)) { "分段索引无效" }
       val source = cachedWav(uri)
-      val offset = index.toLong() * 60L * 32000L
-      val length = minOf(60L * 32000L, source.length() - 44 - offset)
+      val chunkBytes = seconds.toLong() * 32000L
+      val dataBytes = source.length() - 44
+      require(index < kotlin.math.ceil(dataBytes.toDouble() / chunkBytes)) { "分段超出录音范围" }
+      val offset = index.toLong() * chunkBytes
+      val length = minOf(chunkBytes, dataBytes - offset)
       require(length > 0) { "分段超出录音范围" }
       RandomAccessFile(source, "r").use { input ->
         val header = ByteArray(44); input.readFully(header)

@@ -1,0 +1,225 @@
+{
+  "protocol": 1,
+  "sampleRate": 16000,
+  "windowSamples": 320,
+  "cases": [
+    {
+      "name": "sustained_pause_midpoint",
+      "budgetBytes": 64000,
+      "totalFrames": 64000,
+      "firstFrame": 0,
+      "amplitude": 1000,
+      "overrides": [
+        [
+          25600,
+          30720,
+          10
+        ]
+      ],
+      "expectedFirstCut": 28160,
+      "expectedIntervals": [
+        [
+          0,
+          28160
+        ],
+        [
+          28160,
+          60000
+        ],
+        [
+          60000,
+          64000
+        ]
+      ]
+    },
+    {
+      "name": "continuous_tone_latest_equal_energy",
+      "budgetBytes": 64000,
+      "totalFrames": 64000,
+      "firstFrame": 0,
+      "amplitude": 1000,
+      "overrides": [],
+      "expectedFirstCut": 31840,
+      "expectedIntervals": [
+        [
+          0,
+          31840
+        ],
+        [
+          31840,
+          63680
+        ],
+        [
+          63680,
+          64000
+        ]
+      ]
+    },
+    {
+      "name": "latest_qualifying_pause",
+      "budgetBytes": 192000,
+      "totalFrames": 192000,
+      "firstFrame": 0,
+      "amplitude": 1000,
+      "overrides": [
+        [
+          65600,
+          72000,
+          5
+        ],
+        [
+          86400,
+          90560,
+          5
+        ]
+      ],
+      "expectedFirstCut": 88480,
+      "expectedIntervals": [
+        [
+          0,
+          88480
+        ],
+        [
+          88480,
+          184320
+        ],
+        [
+          184320,
+          192000
+        ]
+      ]
+    },
+    {
+      "name": "running_peak_not_global_peak",
+      "budgetBytes": 64000,
+      "totalFrames": 64000,
+      "firstFrame": 0,
+      "amplitude": 100,
+      "overrides": [
+        [
+          22400,
+          27200,
+          10
+        ],
+        [
+          28800,
+          32000,
+          1000
+        ]
+      ],
+      "expectedFirstCut": 27040,
+      "expectedIntervals": [
+        [
+          0,
+          27040
+        ],
+        [
+          27040,
+          58880
+        ],
+        [
+          58880,
+          64000
+        ]
+      ]
+    },
+    {
+      "name": "nonzero_start",
+      "budgetBytes": 64000,
+      "totalFrames": 96000,
+      "firstFrame": 16000,
+      "amplitude": 1000,
+      "overrides": [
+        [
+          41600,
+          46720,
+          10
+        ]
+      ],
+      "expectedFirstCut": 44160,
+      "expectedIntervals": [
+        [
+          16000,
+          44160
+        ],
+        [
+          44160,
+          76000
+        ],
+        [
+          76000,
+          96000
+        ]
+      ]
+    },
+    {
+      "name": "minimum_budget_no_search_hop",
+      "budgetBytes": 640,
+      "totalFrames": 1000,
+      "firstFrame": 0,
+      "amplitude": 1000,
+      "overrides": [],
+      "expectedFirstCut": 320,
+      "expectedIntervals": [
+        [
+          0,
+          320
+        ],
+        [
+          320,
+          640
+        ],
+        [
+          640,
+          960
+        ],
+        [
+          960,
+          1000
+        ]
+      ]
+    },
+    {
+      "name": "one_sample_last_hop",
+      "budgetBytes": 642,
+      "totalFrames": 1000,
+      "firstFrame": 0,
+      "amplitude": 1000,
+      "overrides": [],
+      "expectedFirstCut": 320,
+      "expectedIntervals": [
+        [
+          0,
+          320
+        ],
+        [
+          320,
+          640
+        ],
+        [
+          640,
+          960
+        ],
+        [
+          960,
+          1000
+        ]
+      ]
+    },
+    {
+      "name": "final_exact_budget",
+      "budgetBytes": 64000,
+      "totalFrames": 32000,
+      "firstFrame": 0,
+      "amplitude": 1000,
+      "overrides": [],
+      "expectedFirstCut": 32000,
+      "expectedIntervals": [
+        [
+          0,
+          32000
+        ]
+      ]
+    }
+  ]
+}
