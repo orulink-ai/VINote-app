@@ -70,3 +70,7 @@ Gradle 插件还需要可发现的 JDK 17 工具链。若已安装但未被发�
 先执行 `npm run config:public`、`npm run config:check:release`。主线程可复用原 App 构建缓存，运行 `assembleDebug -PvinoteChannel=public -PvinoteStandalone=true --max-workers=1 --no-daemon`，使用既有 JVM768/Node384 资源预算。既有 MainApplication 关闭该包的 dev support，Gradle bundler 对非 debuggableVariants 的包设置 devEnabled=false，因此内置 JS 使用 generationBaseUrl，而普通 Metro 热更新不变。没有新增 native API。
 
 保持 `com.vinoteapp.dev` 及兼容签名，只覆盖安装，不卸载或清数据；本代理未执行构建、安装或操作设备。正式 Release 缺发布签名凭证时不构建、不回退调试签名。无推理验收只打开导入页核对就绪/失败重试，以及已有笔记查看、编辑保存和重开；不要点击生成、重试生成或录音处理。本地 TypeScript/Jest、GitHub CI、runtime 部署、实际安装包均是独立证据。
+
+## B站设备音频下载原生变更
+
+本轮MeetingFiles新增bilibiliDownloadProtocol=1及start/cancel/releaseBilibiliDownload，另有专用policy/downloader源码。需重建匹配AndroidAPK，不能仅替换JS。沿用public standalone缓存构建与兼容签名覆盖安装，保留com.vinoteapp.dev数据；iOS没有对应native路径。离线编译：python scripts/check-bilibili-native-offline.py，只用已有缓存，不调用Gradle/网络/模型。实际包构建及设备只下载验收由主线程负责，再决定是否进行新样本首次推理；不可重试旧receipt。

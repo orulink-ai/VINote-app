@@ -339,7 +339,7 @@ export async function createTextNote(title: string, content: string, taskId = `t
   changed()
   return note
 }
-export async function saveSourceNote(taskId: string, title: string, content: string, sourceType: string, owner: string, sourceCreatedAt?: string) {
+export async function saveSourceNote(taskId: string, title: string, content: string, sourceType: string, owner: string, sourceCreatedAt?: string, bilibiliSource?: import('../types/bilibili').BilibiliSource) {
   const namespace = await prefix()
   if (namespace !== `vinote:${owner}:note:`) throw new Error('账号已切换，结果仍保留在原任务中')
   if (!content.trim()) throw new Error('未收到有效笔记正文，请重新查询原任务')
@@ -348,7 +348,7 @@ export async function saveSourceNote(taskId: string, title: string, content: str
   if (existing) return JSON.parse(existing) as Note
   const now = new Date().toISOString()
   // A remote task is not a local recording ID and must not grant local playback.
-  const note: Note = { id, content_id: operationId(), title: recordingTitle(sourceCreatedAt || '', summaryTopic(content) || title.trim() || '总结笔记'), content, source_type: ['transcript', 'document'].includes(sourceType) ? 'file' : sourceType,
+  const note: Note = { id, content_id: operationId(), ...(bilibiliSource ? { bilibili_source: bilibiliSource } : {}), title: recordingTitle(sourceCreatedAt || '', summaryTopic(content) || title.trim() || '总结笔记'), content, source_type: ['transcript', 'document'].includes(sourceType) ? 'file' : sourceType,
     generation_client: 'mobile', status: 'done', version: 1, created_at: now, updated_at: now }
   await Storage.setItem(key, JSON.stringify(note))
   changed()

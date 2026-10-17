@@ -53,3 +53,8 @@
 
 - 最终全量：124 suites / 1153 tests全部通过，21.19s，Node192单进程+offline-network守卫；包含总开关优先修复、422/502不落operation、新来源成功顺序、旧cap/普通网页跳过及既有return/recover不变。tsc exit0，Windows core.whitespace=cr-at-eol diff --check exit0。
 - 冻结源码仍4文件：intakeCapabilities.ts/integration.ts/noteIntake.ts/NoteIntakeScreen.tsx；没有native新文件。所有改动未提交，HEAD保持a9174e4，未写原App或root。
+
+
+## 后续：Android显式设备保存
+
+[Android设备保存B站音频](../2026-10-17_115917_wugui_无Issue_Android设备保存B站音频/index.md) 在独立用户动作下本机解析/下载到笔记文件库，随后沿用公网上传。它不是412自动回退，也不改变本档案video_url总开关/平台范围/只读预检或旧任务GET-only。新增原生包需主线程构建和实际验收，未运行模型。

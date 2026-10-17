@@ -9,9 +9,32 @@ import { listLocalFileAssociations, type LocalFileAssociation } from './localFil
 import { listLocalNotes } from './notes'
 import { workspaceViews } from './workspaceStorage'
 import { localLibrary } from './localLibrary'
+import type { BilibiliSource } from '../types/bilibili'
 
 export type FilePurpose = 'meeting' | 'note'
-export type LocalFile = { id: string; name: string; uri: string; size: number; category: 'audio' | 'video' | 'file'; createdAt: string; extension: string; purpose?: FilePurpose; source?: 'import' | 'screen_recording' }
+export type LocalFile = { id: string; name: string; uri: string; size: number; category: 'audio' | 'video' | 'file'; createdAt: string; extension: string; purpose?: FilePurpose; source?: 'import' | 'screen_recording' | 'bilibili'; bilibiliSource?: BilibiliSource }
+
+export async function registerBilibiliFile(owner: string, id: string, uri: string, title: string, size: number, source: BilibiliSource, guard: () => Promise<void>) {
+  const { path } = await directory(owner)
+  if (!/^[a-f0-9-]{36}$/.test(id) || source.operationId !== id || uri !== `file://${FS.CachesDirectoryPath}/bilibili-${id}.m4a` || !Number.isSafeInteger(size) || size <= 0) throw new Error('下载文件登记无效，未提交生成')
+  const target = `${path}/${id}.m4a`, metadata = `${path}/${id}.meta.json`, temporary = metadata + '.tmp'
+  let moved = false, committed = false
+  await guard(); await FS.mkdir(path); await guard()
+  if (await FS.exists(target) || await FS.exists(metadata) || await FS.exists(temporary)) throw new Error('原下载文件已保留，请到文件库查看，不会覆盖')
+  if (Number((await FS.stat(uri)).size) !== size) throw new Error('下载文件不完整，未提交生成')
+  const file: LocalFile = { id, uri: `file://${target}`, name: `${title}.m4a`, size, category: 'audio', extension: 'm4a', purpose: 'note', source: 'bilibili', bilibiliSource: source, createdAt: new Date().toISOString() }
+  try {
+    await guard(); await FS.moveFile(uri, target); moved = true; await guard()
+    await FS.writeFile(temporary, JSON.stringify(file), 'utf8'); await guard()
+    await FS.moveFile(temporary, metadata); committed = true; await guard()
+    return file
+  } finally {
+    if (!committed) {
+      await FS.unlink(temporary).catch(() => {})
+      if (moved) await FS.unlink(target).catch(() => {})
+    }
+  }
+}
 const audioExtensions = new Set(['m4a', 'mp3', 'wav', 'aac', 'flac', 'ogg', 'opus'])
 const allowed = new Set([...audioExtensions, 'mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v', 'pdf', 'docx', 'md', 'txt', 'srt', 'vtt', 'json'])
 async function directory(expectedOwner?: string) {

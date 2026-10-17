@@ -2,22 +2,84 @@ import Storage from '@react-native-async-storage/async-storage'
 import FS from 'react-native-fs'
 import { integrationJson } from '../src/lib/integration'
 import { readAccountId } from '../src/lib/storage'
-import { inspectIntake, intakeUrl, readIntake, recoverIntake, submitIntake } from '../src/lib/noteIntake'
+import { inspectIntake, intakeUrl, leaveReservedIntake, readIntake, recoverIntake, submitIntake } from '../src/lib/noteIntake'
 import { ApiError } from '../src/lib/errors'
 import { saveSourceNote } from '../src/lib/notes'
 import { listLocalFileAssociations } from '../src/lib/localFileAssociations'
+import { loadModels, loadSelection } from '../src/lib/models'
 
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
 jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'http://127.0.0.1:8900', verifyContentService: jest.fn(async () => ({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true })), integrationJson: jest.fn(), operationId: () => '11111111-1111-4111-8111-111111111111' }))
 jest.mock('../src/lib/notes', () => ({ saveSourceNote: jest.fn() }))
+jest.mock('../src/lib/models', () => ({ loadSelection: jest.fn(), loadModels: jest.fn() }))
 const api = integrationJson as jest.Mock
 const taskId = '12345678-1234-4234-8234-123456789012'
 const operation = '11111111-1111-4111-8111-111111111111'
-beforeEach(async () => { jest.clearAllMocks(); (readAccountId as jest.Mock).mockResolvedValue('owner'); for (const key of await Storage.getAllKeys()) await Storage.removeItem(key) })
+beforeEach(async () => { jest.clearAllMocks(); (readAccountId as jest.Mock).mockResolvedValue('owner');
+  jest.mocked(loadSelection).mockResolvedValue({ asr_model: 'selected-asr', llm_model: 'selected-llm' })
+  jest.mocked(loadModels).mockResolvedValue([{ id: 'selected-asr', modelType: 'asr', runtimeStatus: 'available' }, { id: 'selected-llm', modelType: 'llm', runtimeStatus: 'available' }])
+  for (const key of await Storage.getAllKeys()) await Storage.removeItem(key) })
 
 it('extracts the video URL from Bilibili share text', () => {
   expect(intakeUrl('【示例视频】 https://b23.tv/example 分享给你')).toBe('https://b23.tv/example')
   expect(() => intakeUrl('不是链接')).toThrow()
+})
+test('new video freezes the explicit model IDs before POST and sends them in JSON', async () => {
+  const selected = { asr_model: 'selected-asr', llm_model: 'selected-llm' }
+  jest.mocked(loadSelection).mockResolvedValueOnce(selected)
+  jest.mocked(loadModels).mockImplementationOnce(async () => {
+    selected.asr_model = 'changed-after-selection'; selected.llm_model = 'changed-after-selection'
+    return [{ id: 'selected-asr', modelType: 'asr', runtimeStatus: 'available' }, { id: 'selected-llm', modelType: 'llm', runtimeStatus: 'available' }]
+  })
+  api.mockImplementationOnce(async (_path, init) => {
+    expect(JSON.parse(init.body)).toMatchObject({ asr_model: 'selected-asr', model_name: 'selected-llm' })
+    expect((await readIntake('owner')).modelSelection).toEqual({ asr_model: 'selected-asr', llm_model: 'selected-llm' })
+    return { task_id: taskId, operation_id: operation, state: 'accepted' }
+  })
+  await submitIntake('owner', { mode: 'url', url: 'https://b23.tv/example' })
+  expect(loadModels).toHaveBeenCalledWith(true)
+})
+test.each(['asr', 'llm'])('unavailable selected %s blocks before operation persistence or generation', async kind => {
+  jest.mocked(loadModels).mockResolvedValueOnce([{ id: 'selected-asr', modelType: 'asr', runtimeStatus: kind === 'asr' ? 'not_available' : 'available' }, { id: 'selected-llm', modelType: 'llm', runtimeStatus: kind === 'llm' ? 'not_available' : 'available' }])
+  await expect(submitIntake('owner', { mode: 'url', url: 'https://b23.tv/example' })).rejects.toThrow('所选模型暂不可用')
+  expect(api).not.toHaveBeenCalled()
+  expect((await readIntake('owner')).operationId).toBeUndefined()
+  expect((await Storage.getAllKeys()).some(k => k.includes(':source-request:'))).toBe(false)
+})
+test('audio upload sends selected IDs as individual form fields, never an options JSON wrapper', async () => {
+  const file = { id: taskId, extension: 'm4a', uri: `file:///documents/files/accounts/owner/${taskId}.m4a`, name: 'audio.m4a', category: 'audio' as const, size: 100, createdAt: '2026-10-17' }
+  jest.mocked(FS.stat).mockResolvedValue({ size: 100 } as never)
+  jest.mocked(FS.readFile).mockResolvedValue(JSON.stringify(file))
+  api.mockImplementationOnce(async (_path, init) => {
+    expect(init.body.get('asr_model')).toBe('selected-asr')
+    expect(init.body.get('model_name')).toBe('selected-llm')
+    expect(init.body.get('options')).toBeNull()
+    return { task_id: taskId, operation_id: operation, state: 'accepted' }
+  })
+  await submitIntake('owner', { mode: 'file', url: '', file })
+})
+test('text source validates LLM without requiring ASR or silently picking another model', async () => {
+  jest.mocked(loadModels).mockResolvedValueOnce([{ id: 'selected-llm', modelType: 'llm', runtimeStatus: 'available' }])
+  api.mockResolvedValueOnce({ task_id: taskId })
+  await submitIntake('owner', { mode: 'url', url: 'https://python.org/about' })
+  expect(JSON.parse(api.mock.calls[0][1].body)).toMatchObject({ model_name: 'selected-llm' })
+  expect(JSON.parse(api.mock.calls[0][1].body).asr_model).toBeUndefined()
+})
+test('leaving reserved retains exact archive and associations, clears only slot, and never dispatches', async () => {
+  const original = { mode: 'file' as const, url: '', operationId: operation, taskId, generationOrigin: 'http://127.0.0.1:8900', receiptState: 'reserved' as const, uncertain: true, modelSelection: { asr_model: 'old-asr', llm_model: 'old-llm' } }
+  await Storage.setItem('vinote:owner:note-intake', JSON.stringify(original))
+  const association = { owner: 'owner', localFileId: taskId, operationId: operation, taskId, generationOrigin: original.generationOrigin, state: 'reserved' }
+  await Storage.setItem(`vinote:owner:local-file-association:${operation}`, JSON.stringify(association))
+  await leaveReservedIntake('owner', original)
+  expect(await readIntake('owner')).toEqual({ mode: 'url', url: '' })
+  expect(JSON.parse((await Storage.getItem(`vinote:owner:source-request:${operation}`))!)).toEqual(original)
+  expect(await listLocalFileAssociations('owner', taskId)).toEqual([association])
+  expect(api).not.toHaveBeenCalled(); expect(loadSelection).not.toHaveBeenCalled()
+})
+test('leaving a changed reserved slot cannot clear a newer operation', async () => {
+  await Storage.setItem('vinote:owner:note-intake', JSON.stringify({ mode: 'url', url: '', operationId: 'new', receiptState: 'reserved' }))
+  await expect(leaveReservedIntake('owner', { mode: 'url', url: '', operationId: operation, receiptState: 'reserved' })).rejects.toThrow('原提交已变化')
+  expect((await readIntake('owner')).operationId).toBe('new')
 })
 it('persists the accepted task and resumes it without submitting again', async () => {
   api.mockResolvedValueOnce({ task_id: taskId })
@@ -224,5 +286,30 @@ test.each([false, true])('existing accepted/recoverable task skips all new-sourc
   if (recovery) api.mockResolvedValueOnce({ task_id: taskId, operation_id: operation, state: 'accepted', status: 'processing' })
   await submitIntake('owner', original as never)
   expect(verifyContentService).not.toHaveBeenCalled()
+  expect(loadSelection).not.toHaveBeenCalled()
+  expect(loadModels).not.toHaveBeenCalled()
   expect(api.mock.calls.map(call => call[0])).toEqual(recovery ? [`/api/source-requests/${operation}`] : [])
+})
+
+test('device-downloaded audio uses one frozen operation and later unknown reopening is GET-only', async () => {
+  const downloadId = '87654321-4321-4321-8321-210987654321'
+  const file = { id: downloadId, extension: 'm4a', uri: `file:///documents/files/accounts/owner/${downloadId}.m4a`, name: '设备下载.m4a', category: 'audio' as const, purpose: 'note' as const, source: 'bilibili' as const, size: 100, createdAt: '2026-10-17',
+    bilibiliSource: { platform: 'bilibili' as const, operationId: downloadId, originalUrl: 'https://b23.tv/example', canonicalUrl: 'https://www.bilibili.com/video/BV1234567890?p=1', bvid: 'BV1234567890', page: 1, aid: '1', cid: '2', duration: 40 } }
+  jest.mocked(FS.stat).mockResolvedValue({ size: 100 } as never)
+  jest.mocked(FS.readFile).mockResolvedValue(JSON.stringify(file))
+  api.mockRejectedValueOnce(new Error('upload result unknown'))
+  await expect(submitIntake('owner', { mode: 'file', url: '', file })).rejects.toThrow('upload result unknown')
+  expect(api).toHaveBeenLastCalledWith('/api/generate_from_upload', expect.objectContaining({ headers: { 'X-VINote-Operation-Id': downloadId } }), 'owner', 180000)
+  const receipt = await readIntake('owner')
+  expect(receipt.operationId).toBe(downloadId)
+  api.mockClear()
+  api.mockResolvedValueOnce({ task_id: taskId, operation_id: downloadId, state: 'accepted', status: 'processing' })
+  await submitIntake('owner', receipt)
+  expect(api.mock.calls.map(call => call[0])).toEqual([`/api/source-requests/${downloadId}`])
+  // Even a fresh file selection cannot replace the persisted association with another POST.
+  await Storage.removeItem('vinote:owner:note-intake')
+  api.mockClear()
+  api.mockResolvedValueOnce({ task_id: taskId, operation_id: downloadId, state: 'accepted', status: 'processing' })
+  await submitIntake('owner', { mode: 'file', url: '', file })
+  expect(api.mock.calls.map(call => call[0])).toEqual([`/api/source-requests/${downloadId}`])
 })

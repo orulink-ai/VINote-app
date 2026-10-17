@@ -1,4 +1,6 @@
 import { Text } from '../components/AppText'
+import { BilibiliSourceInfo } from '../components/BilibiliSourceInfo'
+import { DetailDisclosure } from '../components/DetailDisclosure'
 import { WorkspaceIcon } from '../components/WorkspaceIcon'
 import { MeetingDetailWorkspace } from '../components/MeetingDetailWorkspace'
 import { NoteVersionsPanel } from '../components/NoteVersionsPanel'
@@ -157,6 +159,7 @@ export function NoteDetailScreen({
   return (
     <View style={styles.screen}>
       <ScreenHeader title={note?.title || '内容详情'} titleLines={2} onBack={onBack} backLabel={`返回${backLabel}`} disabled={deleting} right={note && <Pressable accessibilityRole="button" accessibilityLabel="内容操作" disabled={deleting} onPress={() => { void openActions() }} style={[styles.textButton, { minWidth: 44, flexDirection: 'row', gap: 4 }]}><WorkspaceIcon name="more" /><Text>操作</Text></Pressable>} />
+      {!loading && note?.bilibili_source && <View style={{ paddingHorizontal: 20 }}><DetailDisclosure title="来源链接与分P"><BilibiliSourceInfo source={note.bilibili_source} /></DetailDisclosure></View>}
       {loading ? (
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.emptyState}>

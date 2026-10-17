@@ -10,13 +10,89 @@ import com.facebook.react.bridge.*
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** 选择器先复制到自有缓存，不持久化第三方 content URI。 */
 class MeetingFiles(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
   private var pending: Promise? = null
   private var audioOnly = true
   private val worker = Executors.newSingleThreadExecutor()
+  private data class Download(val id: String, val owner: String, val cancelled: AtomicBoolean = AtomicBoolean(), @Volatile var downloader: BilibiliAudioDownloader? = null)
+  @Volatile private var invalidated = false
+  private val downloadLock = Any()
+  private var download: Download? = null
   override fun getName() = "MeetingFiles"
+  override fun getConstants(): MutableMap<String, Any> = mutableMapOf("bilibiliDownloadProtocol" to 1)
+  @ReactMethod fun addListener(name: String) {}
+  @ReactMethod fun removeListeners(count: Double) {}
+  @ReactMethod fun startBilibiliDownload(id: String, owner: String, url: String, maximum: Double, promise: Promise) {
+    val job: Download
+    try {
+      require(Regex("[a-f0-9-]{36}").matches(id) && owner.isNotBlank() && owner.length <= 200 && owner.none { it < ' ' })
+      require(maximum.isFinite() && maximum == maximum.toLong().toDouble() && maximum.toLong() in 1..BilibiliDownloadPolicy.MAX_AUDIO)
+      BilibiliDownloadPolicy.input(url)
+      synchronized(downloadLock) {
+        require(!invalidated && download == null) { "已有下载尚未结束" }
+        job = Download(id, owner); download = job
+      }
+    } catch (_: Exception) { promise.reject("BILI_DOWNLOAD_INVALID", "下载未开始，请检查B站链接、分P和文件上限，或等待当前下载结束。"); return }
+    worker.execute {
+      val part = File(context.cacheDir, "bilibili-$id.part")
+      val target = File(context.cacheDir, "bilibili-$id.m4a")
+      var last = 0L
+      var ownsFiles = false
+      try {
+        require(!part.exists() && !target.exists())
+        ownsFiles = true
+        val downloader = BilibiliAudioDownloader(job.cancelled) { bytes, total ->
+          val now = System.nanoTime()
+          if (now - last >= 250_000_000 || bytes == total) {
+            last = now
+            if (context.hasActiveReactInstance()) context.emitDeviceEvent("VINoteBilibiliDownload", Arguments.createMap().apply {
+              putString("id", id); putString("owner", owner); putDouble("bytes", bytes.toDouble()); putDouble("total", total.toDouble())
+            })
+          }
+        }
+        job.downloader = downloader
+        val source = downloader.download(url, part, maximum.toLong())
+        downloader.check()
+        val extractor = MediaExtractor()
+        try {
+          extractor.setDataSource(part.path)
+          val types = (0 until extractor.trackCount).map { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME) ?: "" }
+          require(types.any { it.startsWith("audio/") } && types.none { it.startsWith("video/") })
+        } finally { extractor.release() }
+        downloader.check()
+        require(!target.exists() && part.renameTo(target))
+        downloader.check()
+        synchronized(downloadLock) { if (download === job) download = null }
+        promise.resolve(Arguments.createMap().apply {
+          putString("uri", Uri.fromFile(target).toString()); putString("title", source.title)
+          putString("originalUrl", source.originalUrl); putString("canonicalUrl", source.canonicalUrl)
+          putString("bvid", source.bvid); putString("aid", source.aid); putString("cid", source.cid)
+          putInt("page", source.page); putDouble("duration", source.duration); putDouble("size", source.size.toDouble())
+        })
+      } catch (error: Exception) {
+        if (ownsFiles) { part.delete(); target.delete() }
+        synchronized(downloadLock) { if (download === job) download = null }
+        promise.reject("BILI_DOWNLOAD_FAILED", if (error is BilibiliDownloadError) error.message else "无法完整保存B站音频，未提交生成；请重试或导入文件。")
+      } finally { synchronized(downloadLock) { if (download === job) download = null } }
+    }
+  }
+  @ReactMethod fun cancelBilibiliDownload(id: String, promise: Promise) {
+    synchronized(downloadLock) { download?.takeIf { it.id == id }?.let { it.cancelled.set(true); it.downloader?.cancel() } }
+    promise.resolve(null)
+  }
+  @ReactMethod fun releaseBilibiliDownload(id: String, promise: Promise) {
+    if (!Regex("[a-f0-9-]{36}").matches(id)) { promise.reject("BILI_DOWNLOAD_INVALID", "下载记录无效"); return }
+    synchronized(downloadLock) { if (download?.id == id) { promise.reject("BILI_DOWNLOAD_ACTIVE", "下载尚未结束，未清理文件"); return } }
+    File(context.cacheDir, "bilibili-$id.part").delete(); File(context.cacheDir, "bilibili-$id.m4a").delete(); promise.resolve(null)
+  }
+  override fun invalidate() {
+    invalidated = true
+    synchronized(downloadLock) { download?.let { it.cancelled.set(true); it.downloader?.cancel() } }
+    worker.shutdown(); super.invalidate()
+  }
   init { context.addActivityEventListener(object : BaseActivityEventListener() {
     override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
       if (requestCode != 4210) return

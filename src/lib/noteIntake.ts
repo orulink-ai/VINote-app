@@ -6,11 +6,13 @@ import { readAccountId } from './storage'
 import { saveSourceNote } from './notes'
 import type { LocalFile } from './localFiles'
 import type { LocalRecording } from '../features/recording/recordingLibrary'
-import { advanceLocalFileAssociation, beginLocalFileAssociation, markLocalFileDispatch } from './localFileAssociations'
+import { advanceLocalFileAssociation, beginLocalFileAssociation, markLocalFileDispatch, readLocalFileAssociation } from './localFileAssociations'
 import { isBilibiliUrl, isExplicitVideoUrl, isVideoUrlAllowed, videoUrlUnavailableMessage } from './intakeCapabilities'
+import { loadModels, loadSelection, type ModelSelection } from './models'
+import { modelEligible } from './modelEligibility'
 
 export type IntakeFile = LocalFile | LocalRecording
-export type IntakeDraft = { retryUncertain?: boolean; modelConfirmationRequired?: boolean; mode: 'url' | 'file'; url: string; file?: IntakeFile; taskId?: string; sourceType?: string; uncertain?: boolean; operationId?: string; receiptState?: 'unknown' | 'reserved' | 'accepted'; recoverySupported?: boolean; generationOrigin?: string; submittedAt?: string }
+export type IntakeDraft = { modelSelection?: ModelSelection; retryUncertain?: boolean; modelConfirmationRequired?: boolean; mode: 'url' | 'file'; url: string; file?: IntakeFile; taskId?: string; sourceType?: string; uncertain?: boolean; operationId?: string; receiptState?: 'unknown' | 'reserved' | 'accepted'; recoverySupported?: boolean; generationOrigin?: string; submittedAt?: string }
 type SourceReceipt = { operation_id: string; task_id: string; state: 'reserved' | 'accepted'; status: string; source_type?: string }
 export type IntakeStatus = { status: string; message?: string; progress?: number | null; retryable?: boolean; result?: { title: string; markdown: string } }
 const key = (owner: string) => `vinote:${owner}:note-intake`
@@ -28,6 +30,13 @@ export async function writeIntake(owner: string, draft: IntakeDraft) {
   await guard(owner)
   await Storage.setItem(key(owner), JSON.stringify(draft))
   await guard(owner)
+}
+export async function leaveReservedIntake(owner: string, expected: IntakeDraft) {
+  const stored = await readIntake(owner)
+  if (!expected.operationId || stored.receiptState !== 'reserved' || stored.operationId !== expected.operationId || stored.taskId !== expected.taskId || stored.generationOrigin !== expected.generationOrigin) throw new Error('原提交已变化，请重新核验后再整理其他内容')
+  // Preserve the exact operation archive; never remove its original file association.
+  await writeIntake(owner, stored)
+  await writeIntake(owner, { mode: 'url', url: '' })
 }
 export function intakeFileName(file: IntakeFile) { return 'name' in file ? file.name : file.originalName || file.title + '.' + (file.extension || 'm4a') }
 export function intakeSourceType(file: IntakeFile) {
@@ -80,6 +89,15 @@ async function submitSource(owner: string, draft: IntakeDraft): Promise<IntakeDr
     if (!draft.file) throw new Error('请先选择文件')
     sourceType = intakeSourceType(draft.file)
     const file = draft.file, extension = file.extension || 'm4a'
+    if ('bilibiliSource' in file && file.bilibiliSource) {
+      const sourceOperation = file.bilibiliSource.operationId
+      if (sourceOperation !== file.id || !/^[a-f0-9-]{36}$/.test(sourceOperation)) throw new Error('原下载操作无法核验，未重新提交')
+      const previous = await readLocalFileAssociation(owner, sourceOperation)
+      if (previous) {
+        if (previous.localFileId !== file.id || previous.generationOrigin !== generationBaseUrl) throw new Error('原下载已绑定另一任务或服务，未重新提交')
+        return recoverIntake(owner, { ...draft, operationId: sourceOperation, generationOrigin: previous.generationOrigin, taskId: previous.taskId, uncertain: true })
+      }
+    }
     const folder = 'name' in file ? 'files' : 'recordings'
     const expected = `file://${FS.DocumentDirectoryPath}/${folder}/accounts/${encodeURIComponent(owner)}/${file.id}.${extension}`
     if (!/^[a-zA-Z0-9-]+$/.test(file.id) || file.uri !== expected) throw new Error('文件不属于当前账号，请重新选择')
@@ -94,7 +112,21 @@ async function submitSource(owner: string, draft: IntakeDraft): Promise<IntakeDr
     form.append('summary_mode', 'default'); form.append('output_language', 'zh-CN')
     body = form; path = '/api/generate_from_upload'
   }
-  const pending: IntakeDraft = { ...draft, submittedAt: new Date().toISOString(), sourceType: sourceType === 'document' ? 'file' : sourceType, operationId: operationId(), generationOrigin: generationBaseUrl, receiptState: 'unknown', uncertain: true }
+  // Only a new submission reaches this point. Never replace a durable operation's models.
+  const selected = await loadSelection()
+  const selection: ModelSelection = { asr_model: selected.asr_model, llm_model: selected.llm_model }
+  await guard(owner)
+  const models = await loadModels(true)
+  await guard(owner)
+  const needsAsr = draft.mode === 'url' ? isExplicitVideoUrl(intakeUrl(draft.url)) : ['audio', 'video'].includes(sourceType)
+  for (const kind of (needsAsr ? ['llm', 'asr'] : ['llm']) as ('llm' | 'asr')[]) {
+    if (!selection[`${kind}_model`] || !models.some(m => m.id === selection[`${kind}_model`] && m.modelType === kind && modelEligible(m))) throw new Error('所选模型暂不可用，原选择已保留，请刷新状态后重试')
+  }
+  const modelOptions = { model_name: selection.llm_model, ...(needsAsr ? { asr_model: selection.asr_model } : {}) }
+  if (typeof body === 'string') body = JSON.stringify({ ...JSON.parse(body), ...modelOptions })
+  else for (const [name, value] of Object.entries(modelOptions)) body.append(name, value)
+  const sourceOperation = draft.mode === 'file' && draft.file && 'bilibiliSource' in draft.file ? draft.file.bilibiliSource?.operationId : undefined
+  const pending: IntakeDraft = { ...draft, modelSelection: selection, submittedAt: new Date().toISOString(), sourceType: sourceType === 'document' ? 'file' : sourceType, operationId: sourceOperation || operationId(), generationOrigin: generationBaseUrl, receiptState: 'unknown', uncertain: true }
   if (pending.mode === 'file' && pending.file && 'name' in pending.file) await beginLocalFileAssociation(owner, pending.file, pending.operationId!)
   // Fail closed on local persistence failure: do not dispatch an unprotected POST.
   await writeIntake(owner, pending)
@@ -143,7 +175,8 @@ export async function inspectIntake(owner: string, draft: IntakeDraft) {
   await guard(owner)
   if (status.status === 'success' && !status.result?.markdown?.trim()) throw new Error('任务已结束，但未收到有效正文；请重新查询，不要重复提交')
   if (status.status === 'success' && status.result?.markdown?.trim()) {
-    const note = await saveSourceNote(draft.taskId, status.result.title, status.result.markdown, draft.sourceType || 'video', owner, draft.file?.createdAt || draft.submittedAt)
+    const note = await saveSourceNote(draft.taskId, status.result.title, status.result.markdown, draft.sourceType || 'video', owner, draft.file?.createdAt || draft.submittedAt,
+      draft.file && 'bilibiliSource' in draft.file ? draft.file.bilibiliSource : undefined)
     await guard(owner)
     if (draft.operationId) await advanceLocalFileAssociation(owner, draft.operationId, draft.taskId, 'saved', note.id)
     // Clear only after local saving succeeds; a failed save keeps the accepted receipt.

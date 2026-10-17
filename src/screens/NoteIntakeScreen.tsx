@@ -4,7 +4,7 @@ import { ApiError } from '../lib/errors'
 import { bindIntakeModel, guardIntakeModel, readIntakeModelContext, sameIntakeModelContext, verifyIntakeModel, type IntakeModelBinding, type IntakeModelContext } from '../lib/intakeModelConfirmation'
 import { sourceRecoveryCopy } from '../lib/sourceRecoveryCopy'
 import React, { useEffect, useRef, useState } from 'react'
-import { Alert, AppState, BackHandler, Pressable, ScrollView, View } from 'react-native'
+import { Alert, AppState, BackHandler, Platform, Pressable, ScrollView, View } from 'react-native'
 import { Text } from '../components/AppText'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { PrimaryButton } from '../components/PrimaryButton'
@@ -15,9 +15,11 @@ import { colors, styles } from '../design-system/theme'
 import { readAccountId } from '../lib/storage'
 import { importLocalFile, verifyLocalFile, type LocalFile } from '../lib/localFiles'
 import { generationBaseUrl, integrationJson, verifyContentService } from '../lib/integration'
-import { allowsBilibili, isExplicitVideoUrl, isVideoUrlAllowed, videoUrlUnavailableMessage, type VideoUrlCapabilities } from '../lib/intakeCapabilities'
+import { allowsBilibili, isBilibiliUrl, isExplicitVideoUrl, isVideoUrlAllowed, videoUrlUnavailableMessage, type VideoUrlCapabilities } from '../lib/intakeCapabilities'
+import { deviceBilibiliAvailable, downloadBilibiliAudio, type BilibiliProgress } from '../lib/bilibiliDownload'
+import { BilibiliSourceInfo } from '../components/BilibiliSourceInfo'
 import { intakeHistoryRecord, sameIntakeHistoryTarget, type IntakeHistoryTarget } from '../lib/intakeHistory'
-import { assertIntakeOrigin, inspectIntake, intakeFileName, intakeSourceType, readIntake, recoverIntake, submitIntake, writeIntake, type IntakeDraft } from '../lib/noteIntake'
+import { assertIntakeOrigin, inspectIntake, intakeFileName, intakeSourceType, intakeUrl, leaveReservedIntake, readIntake, recoverIntake, submitIntake, writeIntake, type IntakeDraft } from '../lib/noteIntake'
 
 const empty: IntakeDraft = { mode: 'url', url: '' }
 export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initialFile, backLabel = '返回笔记', recoveryTarget }: { onBack: () => void; onSaved: (id: string) => void; initialMode?: 'url' | 'file'; initialFile?: LocalFile; backLabel?: string; recoveryTarget?: IntakeHistoryTarget }) {
@@ -33,6 +35,9 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
   const [serviceError, setServiceError] = useState('')
   const [uploadLimit, setUploadLimit] = useState<number | null>(null)
   const [videoCapabilities, setVideoCapabilities] = useState<VideoUrlCapabilities | null>(null)
+  const [deviceProgress, setDeviceProgress] = useState<BilibiliProgress | null>(null)
+  const deviceDownload = useRef<ReturnType<typeof downloadBilibiliAudio> | null>(null)
+  useEffect(() => () => { deviceDownload.current?.cancel() }, [])
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [modelSheet, setModelSheet] = useState(false), [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState(''), [modelContext, setModelContext] = useState<IntakeModelContext | null>(null)
@@ -150,7 +155,33 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
   }
   const start = () => {
     if (draft.uncertain || draft.operationId) void query.current()
+    else if (deviceBilibiliPath) saveDeviceAudio()
+    else if (iosBilibiliBlocked) return
     else void submit()
+  }
+  const saveDeviceAudio = () => {
+    if (locked.current || !ready || serviceState !== 'ready' || !deviceBilibiliAvailable() || current.current.mode !== 'url' || current.current.operationId || current.current.taskId || current.current.uncertain) return
+    const url = current.current.url, account = owner.current
+    const budget = Math.min(uploadLimit || 128 * 1024 * 1024, 128 * 1024 * 1024)
+    Alert.alert('从 B站保存音频？', `将使用设备网络，最多下载 ${Math.floor(budget / 1024 / 1024)} MB。请保持 App 在前台。只保存到笔记资料，不上传、不生成。`, [
+      { text: '取消', style: 'cancel' }, { text: '保存音频', onPress: () => {
+        if (locked.current || !mounted.current || current.current.url !== url || owner.current !== account || current.current.operationId || current.current.taskId || current.current.uncertain) return
+        locked.current = true; setBusy(true); setError(''); setDeviceProgress({ bytes: 0, total: null }); setMessage('正在解析 B站来源…')
+        void (async () => {
+          try {
+            const download = downloadBilibiliAudio(account, intakeUrl(url), budget, value => { if (mounted.current) setDeviceProgress(value) })
+            deviceDownload.current = download
+            const file = await download.promise
+            if (!mounted.current || await readAccountId() !== account) return
+            const next: IntakeDraft = { mode: 'file', url: '', file }
+            await writeIntake(account, next)
+            if (!mounted.current) return
+            accept(next); setMessage('音频已保存到笔记资料。点击生成后才上传处理；原链接与分P已保留。')
+          } catch (cause) { if (mounted.current) { setMessage(''); setError(cause instanceof Error ? cause.message : '保存音频失败，未提交生成。') } }
+          finally { deviceDownload.current = null; locked.current = false; if (mounted.current) { setDeviceProgress(null); setBusy(false) } }
+        })()
+      } },
+    ])
   }
   const choose = async () => {
     if (locked.current || draft.operationId || draft.uncertain) return
@@ -263,6 +294,19 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
     if (confirmationNeeded && mounted.current) await openModels()
   }
   const changeSource = () => Alert.alert('保留原任务，整理另一份内容？', '原任务不会被取消，已保存笔记和原文件也不会删除。', [{ text: '取消', style: 'cancel' }, { text: '更换来源', onPress: () => void writeIntake(owner.current, empty).then(() => { if (timer.current) clearTimeout(timer.current); accept(empty); setTerminal(false); setError(''); setMessage('') }).catch(cause => setError(cause.message)) }])
+  const leaveReserved = () => {
+    if (locked.current || current.current.receiptState !== 'reserved') return
+    const original = current.current, account = owner.current
+    Alert.alert('整理另一份内容？', '原提交记录和文件关联会保留，不会取消或重新提交。新内容需要另行点击生成。', [{ text: '取消', style: 'cancel' }, { text: '整理另一份内容', onPress: () => {
+      if (!mounted.current || locked.current || current.current !== original || owner.current !== account) return
+      locked.current = true; setBusy(true)
+      void leaveReservedIntake(account, original).then(() => {
+        if (!mounted.current) return
+        if (timer.current) clearTimeout(timer.current)
+        accept(empty); saved.current = false; setTerminal(false); setRetryable(false); setTaskProgress(null); setError(''); setMessage('原提交记录已保留，请选择新的内容。')
+      }).catch(cause => { if (mounted.current) setError(cause.message) }).finally(() => { locked.current = false; if (mounted.current) setBusy(false) })
+    } }])
+  }
   const useLibraryFile = () => {
     if (!initialFile || locked.current || !ready) return
     Alert.alert('使用文件库中的文件？', draft.taskId || draft.operationId || draft.uncertain ? '原任务保留在处理历史中，不会取消或再次提交。此文件需要你另行点击生成。' : '将当前未提交来源切换到所选文件，原始文件保留。', [{ text: '保留当前来源', style: 'cancel' }, { text: '使用此文件', onPress: () => {
@@ -275,6 +319,9 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
   const fileLimit = uploadLimit === null ? null : Math.min(uploadLimit, draft.file && ['pdf', 'docx'].includes(draft.file.extension || '') ? 20 * 1024 * 1024 : Infinity)
   const fileTooLarge = draft.mode === 'file' && draft.file && 'size' in draft.file && fileLimit !== null && draft.file.size > fileLimit
   const videoLinkBlocked = draft.mode === 'url' && videoCapabilities !== null && isExplicitVideoUrl(draft.url) && !isVideoUrlAllowed(draft.url, videoCapabilities)
+  const freshBilibili = draft.mode === 'url' && !draft.taskId && !draft.operationId && !draft.uncertain && isBilibiliUrl(draft.url)
+  const deviceBilibiliPath = freshBilibili && deviceBilibiliAvailable()
+  const iosBilibiliBlocked = freshBilibili && !deviceBilibiliAvailable() && Platform.OS === 'ios'
   const legacyVideoLinks = videoCapabilities?.video_url === true && videoCapabilities.video_url_platforms === undefined
   const bilibiliLinks = videoCapabilities !== null && allowsBilibili(videoCapabilities) && !legacyVideoLinks
   const linkLabel = bilibiliLinks ? '网页、B站或文档链接' : legacyVideoLinks ? '网页或视频链接' : '网页或文档链接'
@@ -294,19 +341,28 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
           : <View style={[styles.card, { gap: 12 }]}><Text style={styles.noteTitle}>{draft.file ? intakeFileName(draft.file) : '选择要整理的文件'}</Text><Text style={styles.subtitle}>PDF、Word DOCX、音视频、文字与字幕。{uploadLimit !== null ? `上传限 ${Math.floor(uploadLimit / 1024 / 1024)} MB；PDF 和 Word 限 ${Math.floor(Math.min(uploadLimit, 20 * 1024 * 1024) / 1024 / 1024)} MB。` : '文件上限将在服务检查后显示。'}PDF 限 200 页；扫描 PDF 请先识别文字。选择后先保存在文件库，点击生成才上传处理。</Text><PrimaryButton secondary title={draft.file ? '重新选择文件' : '选择文件'} disabled={busy || !ready || !!draft.operationId || draft.uncertain} onPress={() => void choose()} /></View>}
       </>}
       {!!fileTooLarge && <AsyncState error={`当前文件超过 ${Math.floor(fileLimit! / 1024 / 1024)} MB 上限，请另选文件。原文件仍保留。`} />}
-      {videoLinkBlocked && <AsyncState error={videoUrlUnavailableMessage(videoCapabilities!)} />}
+      {deviceBilibiliPath && <Text style={styles.subtitle}>先读取音频并保存到笔记资料；保存后再点击生成。</Text>}
+      {freshBilibili && !deviceBilibiliAvailable() && <Text style={styles.subtitle}>设备保存目前需要新版 Android 安装包；iOS 暂不支持，请导入文件。</Text>}
+      {deviceProgress && <View style={{ gap: 8 }}>
+        <Text accessibilityLiveRegion="polite" style={styles.subtitle}>{deviceProgress.bytes ? `已下载 ${(deviceProgress.bytes / 1024 / 1024).toFixed(1)} MB${deviceProgress.total ? ` / ${(deviceProgress.total / 1024 / 1024).toFixed(1)} MB` : ''}` : '正在解析来源，尚未提交生成…'}</Text>
+        <PrimaryButton secondary title="取消设备下载" onPress={() => deviceDownload.current?.cancel()} />
+      </View>}
+      {draft.file && 'bilibiliSource' in draft.file && <BilibiliSourceInfo source={draft.file.bilibiliSource} />}
+      {videoLinkBlocked && !deviceBilibiliPath && !iosBilibiliBlocked && <AsyncState error={videoUrlUnavailableMessage(videoCapabilities!)} />}
       {!awaitingLibraryChoice && draft.taskId && <>
-        <Text accessibilityRole="header" accessibilityLiveRegion="polite" style={styles.noteTitle}>{draft.retryUncertain ? '原任务重试结果待确认' : terminal ? '处理未完成，原来源保留' : '正在整理笔记'}</Text>
-        {!terminal && <ProcessingProgress label="整理笔记" percent={taskProgress} unknownLabel="正在查询原任务，暂未提供可计量进度" />}
+        <Text accessibilityRole="header" accessibilityLiveRegion="polite" style={styles.noteTitle}>{draft.receiptState === 'reserved' ? '提交待核验' : draft.uncertain ? '原提交结果待核验' : draft.retryUncertain ? '原任务重试结果待确认' : terminal ? '处理未完成，原来源保留' : '正在整理笔记'}</Text>
+        {draft.receiptState === 'reserved' && <Text style={styles.subtitle}>尚未确认任务启动。请核验原提交，不会重新派发。</Text>}
+        {!terminal && draft.receiptState !== 'reserved' && !draft.uncertain && <ProcessingProgress label="整理笔记" percent={taskProgress} unknownLabel="正在查询原任务，暂未提供可计量进度" />}
 
       </>}
       {__DEV__ && (draft.operationId || draft.taskId || error) && <View style={{ gap: 8 }}><PrimaryButton tertiary title={diagnosticsOpen ? '收起开发诊断' : '开发诊断'} onPress={() => setDiagnosticsOpen(value => !value)} />{diagnosticsOpen && <View style={{ gap: 4 }}>{draft.operationId && <Text selectable style={styles.subtitle}>提交编号：{draft.operationId}</Text>}{draft.taskId && <Text selectable style={styles.subtitle}>任务编号：{draft.taskId}</Text>}<Text style={styles.subtitle}>网页与 PDF/DOCX 支持原提交回执核验；视频、音频和逐字稿尚未支持提交去重。</Text>{!!error && <Text selectable style={styles.subtitle}>{error}</Text>}</View>}</View>}
       {(draft.operationId || draft.uncertain) && !draft.taskId && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>处理状态：提交待确认。保存位置：笔记。来源已保留，请查询原任务，不会自动重复提交。</Text>}
       <AsyncState loading={!draft.taskId && (busy || (!ready && !error))} loadingLabel={draft.taskId ? '正在查询原任务…' : sourceRecoveryCopy(message) || '正在准备来源…'} error={sourceRecoveryCopy(error)} />
       {!ready && !!error && <PrimaryButton secondary title="重新读取来源" onPress={() => setPrepareAttempt(value => value + 1)} />}
+      {draft.receiptState === 'reserved' && <PrimaryButton secondary title="整理另一份内容" disabled={busy} onPress={leaveReserved} />}
       {!draft.taskId && !busy && message && !error && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>{sourceRecoveryCopy(message)}</Text>}
       {!awaitingLibraryChoice && (draft.taskId ? <View style={{ gap: 10 }}><PrimaryButton title={draft.receiptState === 'reserved' ? '核验原提交' : '重新查询结果'} disabled={busy} onPress={() => void query.current()} />{retryable && <PrimaryButton secondary title={draft.modelConfirmationRequired ? "确认模型并恢复原任务" : "重试处理原任务"} disabled={busy} onPress={() => void retry()} />}{terminal && <PrimaryButton tertiary title="更换来源" disabled={busy} onPress={changeSource} />}</View>
-        : <PrimaryButton title={draft.uncertain || draft.operationId ? '核验原提交' : '生成总结笔记'} loading={busy} disabled={!ready || (!draft.operationId && !draft.uncertain && (serviceState !== 'ready' || !!fileTooLarge || videoLinkBlocked || (draft.mode === 'url' ? !draft.url.trim() : !draft.file)))} onPress={start} />)}
+        : <PrimaryButton title={draft.uncertain || draft.operationId ? '核验原提交' : deviceBilibiliPath ? '读取B站内容' : '生成总结笔记'} loading={busy} disabled={!ready || (!draft.operationId && !draft.uncertain && (serviceState !== 'ready' || !!fileTooLarge || iosBilibiliBlocked || (videoLinkBlocked && !deviceBilibiliPath) || (draft.mode === 'url' ? !draft.url.trim() : !draft.file)))} onPress={start} />)}
       {!awaitingLibraryChoice && draft.taskId && <DetailDisclosure key={`source-${draft.generationOrigin}-${draft.operationId}-${draft.taskId}`} title="来源与保存位置">
           <Text style={styles.subtitle}>{draft.mode === 'url' ? draft.url || '已提交的链接' : draft.file ? intakeFileName(draft.file) : '已提交的文件'}</Text>
           <Text style={styles.subtitle}>保存位置：笔记。返回后仍查询同一任务。</Text>

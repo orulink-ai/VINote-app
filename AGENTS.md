@@ -106,3 +106,9 @@ SummaryCheckpoint v11仅以相同model/title/source复用完整draft/audit；v8-
 2026-10-17 B站平台能力补充：可选video_url_platforms显式列表优先限定视频平台，当前App只实现bilibili（bilibili.com/b23.tv），其余明确视频站和媒体直链禁用；列表空禁全部，格式错误失败关闭。video_url是总开关，非true必须拒绝全部视频，即使列表含bilibili；旧device无列表时video_url=true保留兼容。页面文案、submitIntake与production integrationJson POST前共享同一判断；后端仍须实际平台下载与出站隔离，客户端不构成下载allowlist。只读预检/离线测试不证明B站生成部署或验收。
 
 2026-10-17 来源预检：可选caps video_source_preflight仅允许整数1；仅新URL+B站在持久operation前POST /api/content-service/video-source {url}（60s），失败真实提示、不标unknown、不POST generate。该POST只读来源、不映射身份/创建任务/模型调用；旧device缺字段、普通网页、文件上传和既有任务return/recover不增加该请求。
+
+## 2026-10-17 Android显式设备B站保存
+
+MeetingFiles协议bilibiliDownloadProtocol=1新增专用解析/流式下载/取消/清理，不走共享RN认证网络，不向B站发送VINote凭证/Cookie或依赖代理。逐hop HTTPS/host/public DNS，原生字节预算、超时、AAC/MP4校验及账号/前台取消。它是独立显式文件获取动作，不伪造公网video_url能力、不在412后自动回退。新Android包必需，iOS/旧包禁用。
+
+下载原件归purpose=note的files/accounts，保留original/canonical URL、BV/aid/cid/page/duration及operation，文件库和笔记可查看来源；CDN签名地址不落盘。首次upload复用该operation，已有关联只GET原操作，不把旧unknown/failed换新或自动再ASR；上传/模型必须另行确认。详情和离线/实际边界见docs/bilibili-device-download.md。

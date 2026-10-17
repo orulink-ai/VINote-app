@@ -110,3 +110,11 @@ Android ASR使用专属VINoteASRTransport与ASRSocketCore，不修改RN全局Web
 源码已接入显式 Release 配置、只读就绪检查和服务端上传预算。公网 URL 配置不证明部署成功；capabilities 就绪不证明 LLM/ASR、文件或链接完整生成。视频链接按后端声明的 `video_url_platforms` 限定：新代码支持仅 B 站/b23.tv 开放，其他视频请导入文件；实际部署/完整生成仍待验收。旧设备服务没有平台列表时沿用 `video_url` 布尔；PDF/DOCX 不超过 20 MiB，其他上传按服务返回的 max_upload_bytes（计划默认 128 MiB）。
 
 PR10 检查时没有任何 workflow，GitHub Actions API 返回 0 个 workflow、PR checks 为空；Actions 已启用且允许全部 actions，缺少 workflow 是当前可确认原因。本次新增 App offline checks：安装锁定依赖后，仅校验配置、脚本、TypeScript 和单 worker Jest，业务网络由测试进程守卫禁止。源码/本地离线结果、GitHub 运行结果、服务部署和手机验收分别记录；尚未推送前不宣称 CI 已运行。iOS 未构建或真机验收，本轮不发 LLM/ASR/生成请求。
+
+## Android 读取 B站内容
+
+新版 Android 输入 B站或 b23.tv 链接，内容服务就绪后点击“读取B站内容”，确认后通过设备网络流式保存音轨到文件库的“笔记资料”。保存后另行点击“生成总结笔记”，按当前明确选择并冻结的 ASR/LLM 进行公网上传和生成；不会在下载完成后自动调用模型。原链接、BV、分P和原音轨保留，已保存笔记可返回列表重开，文件详情可查看关联笔记。会议资料与笔记资料分开管理。
+
+设备读取不向 B站发送 VINote 凭证或浏览器 Cookie，不依赖 USB reverse 或代理，不绕验证码，读取受限会如实提示。旧未知或已登记操作只核验，不自动重放或换操作；可明确保留原记录后整理另一份内容。iOS 暂不支持设备读取 B站，请导入文件。
+
+该流程已在一份40秒公开样本上完成 Android 下载、上传、Aliyun ASR、DeepSeek 生成、保存重开及文件库来源/关联核验。具体构建、离线回归、实际验收与未测边界见[设备读取合同与验收记录](docs/bilibili-device-download.md)。

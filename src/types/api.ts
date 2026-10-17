@@ -3,6 +3,7 @@ export type User = { id: string; email: string }
 export type AuthResponse = User & { access_token: string; token_type: string }
 
 export type Note = {
+  bilibili_source?: import('./bilibili').BilibiliSource
   id: string
   content_id?: string
   title: string

@@ -21,7 +21,7 @@ type Row = { id: string; title: string; category: string; purpose?: FilePurpose;
 const fileSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1073741824 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1073741824).toFixed(1)} GB`
 const filters = [{ id: 'all', title: '全部' }, { id: 'audio', title: '音频' }, { id: 'video', title: '视频' }, { id: 'document', title: '文档' }]
 const normalizedCategory = (value?: string) => value === 'recording' ? 'audio' : value === 'screen' ? 'video' : value === 'file' ? 'document' : filters.some(item => item.id === value) ? value! : 'all'
-const sourceBadge = (row: Row) => row.record ? row.record.source === 'import' ? '导入音频' : '录音' : row.file?.source === 'screen_recording' ? '录屏' : row.file?.source === 'import' ? row.category === 'video' ? '导入视频' : row.category === 'audio' ? '导入音频' : '导入文档' : ''
+const sourceBadge = (row: Row) => row.record ? row.record.source === 'import' ? '导入音频' : '录音' : row.file?.source === 'bilibili' ? 'B站音频' : row.file?.source === 'screen_recording' ? '录屏' : row.file?.source === 'import' ? row.category === 'video' ? '导入视频' : row.category === 'audio' ? '导入音频' : '导入文档' : ''
 const purposes = [{ id: 'meeting' as const, title: '会议资料' }, { id: 'note' as const, title: '笔记资料' }]
 export type FileLibraryView = { purpose?: FilePurpose; category: string; query: string; unassigned?: boolean }
 export function FileLibraryScreen({ onRecording, onOpenNote, onSummarize, view, onViewChange, sourceNote, onBack }: { onRecording: (id: string) => void; onOpenNote: (id: string) => void; onSummarize?: (file: LocalFile) => void; view?: FileLibraryView; onViewChange?: (value: FileLibraryView) => void; sourceNote?: Note; onBack?: () => void }) {
@@ -133,6 +133,7 @@ export function FileLibraryScreen({ onRecording, onOpenNote, onSummarize, view, 
         }} onClose={() => { if (!busy) setSelected(null) }}>
       {selected && <><View ref={detailsRef} accessible accessibilityLabel={`文件详情 ${selected.name}`} style={{ gap: 6 }}><Text style={styles.label}>文件信息</Text><Text style={styles.subtitle}>{selected.extension.toUpperCase()} · {fileSize(selected.size)} · {new Date(selected.createdAt).toLocaleDateString()}</Text><Text style={styles.subtitle}>原始文件独立保留。</Text></View>
         {!sourceNote && !selected.purpose && <View style={{ gap: 10, paddingVertical: 12 }}><Text style={styles.label}>选择资料用途</Text><Text style={styles.subtitle}>只保存用途分类，不移动原件、不发出处理请求，也不改变已保存正文。</Text><PrimaryButton secondary title="归入会议资料" loading={busy} onPress={() => assignPurpose(selected, 'meeting')} /><PrimaryButton secondary title="归入笔记资料" disabled={busy} onPress={() => assignPurpose(selected, 'note')} /></View>}
+        <BilibiliSourceInfo source={selected.bilibiliSource} />
         {!sourceNote && <View style={{ gap: 10, paddingVertical: 12 }}><Text style={styles.label}>关联内容与处理状态</Text>{linksLoading && <Text style={styles.subtitle}>正在读取关联内容…</Text>}{!linksLoading && !linksError && !links.length && <Text style={styles.subtitle}>尚无可核验的关联内容；不会从名称或旧正文推断来源。</Text>}{links.map(link => <View key={link.association.operationId} style={{ gap: 6 }}>
           <Text style={styles.subtitle}>{link.association.state === 'saved' ? link.noteId ? '正文已保存 · 原件在此设备' : '正文曾保存，当前未缓存或已移除' : link.association.state === 'prepared' ? '来源已登记，尚未发出处理请求' : link.association.state === 'unknown' ? '原提交待核验，不自动重新提交' : link.association.state === 'reserved' ? '原提交已登记，排队尚未确认' : '原任务已接收，笔记尚未保存'}</Text>
           {link.noteId && <PrimaryButton secondary={links.filter(value => value.noteId).length !== 1} title={`查看关联笔记：${link.noteTitle || '已保存笔记'}`} disabled={busy} onPress={() => openLinkedNote(selected, link)} />}
@@ -144,3 +145,4 @@ export function FileLibraryScreen({ onRecording, onOpenNote, onSummarize, view, 
     </BottomActionSheet>
   </View>
 }
+import { BilibiliSourceInfo } from '../components/BilibiliSourceInfo'

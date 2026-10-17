@@ -1,16 +1,19 @@
 import { Text } from '../src/components/AppText'
 import React from 'react'
 import Renderer, { act } from 'react-test-renderer'
+import { Alert, Platform } from 'react-native'
+import { deviceBilibiliAvailable, downloadBilibiliAudio } from '../src/lib/bilibiliDownload'
 import { NoteIntakeScreen } from '../src/screens/NoteIntakeScreen'
-import { inspectIntake, readIntake, recoverIntake, submitIntake, writeIntake } from '../src/lib/noteIntake'
+import { inspectIntake, leaveReservedIntake, readIntake, recoverIntake, submitIntake, writeIntake } from '../src/lib/noteIntake'
 import { verifyLocalFile, type LocalFile } from '../src/lib/localFiles'
 import { integrationJson } from '../src/lib/integration'
 import { readAccountId } from '../src/lib/storage'
 
+jest.mock('../src/lib/bilibiliDownload', () => ({ deviceBilibiliAvailable: jest.fn(() => false), downloadBilibiliAudio: jest.fn() }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
 jest.mock('../src/lib/localFiles', () => ({ importLocalFile: jest.fn(), verifyLocalFile: jest.fn(async () => {}) }))
 jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://source.invalid', verifyContentService: jest.fn(async () => ({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true })), integrationJson: jest.fn() }))
-jest.mock('../src/lib/noteIntake', () => ({ assertIntakeOrigin: jest.fn(), readIntake: jest.fn(), recoverIntake: jest.fn(), submitIntake: jest.fn(), inspectIntake: jest.fn(), writeIntake: jest.fn(async () => {}), intakeFileName: jest.fn(), intakeSourceType: jest.fn() }))
+jest.mock('../src/lib/noteIntake', () => ({ assertIntakeOrigin: jest.fn(), readIntake: jest.fn(), recoverIntake: jest.fn(), submitIntake: jest.fn(), inspectIntake: jest.fn(), leaveReservedIntake: jest.fn(async () => {}), writeIntake: jest.fn(async () => {}), intakeFileName: jest.fn(), intakeSourceType: jest.fn(), intakeUrl: jest.fn((url: string) => url) }))
 const pending = { mode: 'url' as const, url: 'https://python.org/about', operationId: 'original', receiptState: 'unknown' as const, uncertain: true }
 const accepted = { ...pending, generationOrigin: 'https://source.invalid', taskId: 'original-task', receiptState: 'accepted' as const, uncertain: false }
 test('a changed history target preserves the newer source without querying or dispatching it', async () => {
@@ -26,6 +29,8 @@ test('a changed history target preserves the newer source without querying or di
 })
 beforeEach(() => {
   jest.clearAllMocks()
+  jest.replaceProperty(Platform, 'OS', 'android')
+  jest.mocked(deviceBilibiliAvailable).mockReturnValue(false)
   jest.mocked(inspectIntake).mockReset()
   jest.mocked(integrationJson).mockReset()
   jest.mocked(readAccountId).mockResolvedValue('owner')
@@ -44,10 +49,28 @@ test('unknown reentry reads its original operation; reserved never submits or re
   expect(inspectIntake).not.toHaveBeenCalled()
   await act(async () => { await press(view, '核验原提交') })
   expect(recoverIntake).toHaveBeenCalledTimes(2)
+  expect(inspectIntake).not.toHaveBeenCalled()
+  expect(view.root.findAll(node => node.props.accessibilityRole === 'header' && node.props.children === '提交待核验').length).toBeGreaterThan(0)
+  expect(view.root.findAll(node => node.props.accessibilityRole === 'header' && node.props.children === '正在整理笔记')).toHaveLength(0)
   expect(submitIntake).not.toHaveBeenCalled()
   expect(integrationJson).not.toHaveBeenCalled()
   expect(view.root.findAll(node => node.props.title === '更换来源')).toHaveLength(0)
   await act(async () => view.unmount())
+})
+test('reserved can explicitly leave only after confirmation; no task read or generation is dispatched', async () => {
+  const reserved = { ...accepted, uncertain: true, receiptState: 'reserved' as const }
+  jest.mocked(recoverIntake).mockResolvedValue(reserved)
+  const alert = jest.spyOn(Alert, 'alert')
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+  await act(async () => { await press(view, '整理另一份内容') })
+  expect(leaveReservedIntake).not.toHaveBeenCalled()
+  const buttons = alert.mock.calls[alert.mock.calls.length - 1][2]!
+  await act(async () => { buttons.find(button => button.text === '整理另一份内容')!.onPress!() })
+  expect(leaveReservedIntake).toHaveBeenCalledWith('owner', reserved)
+  expect(view.root.findAll(node => node.props.title === '生成总结笔记')).toHaveLength(1)
+  expect(inspectIntake).not.toHaveBeenCalled(); expect(submitIntake).not.toHaveBeenCalled(); expect(integrationJson).not.toHaveBeenCalled()
+  await act(async () => view.unmount()); alert.mockRestore()
 })
 test('accepted failed work is explicitly retried by the same task after a fresh read', async () => {
   jest.mocked(readIntake).mockResolvedValue(accepted)
@@ -204,5 +227,73 @@ test('master video switch false hides Bilibili entry and blocks generation despi
   expect(view.root.findAll(node => node.props.title === '生成总结笔记')[0].props.disabled).toBe(true)
   expect(submitIntake).not.toHaveBeenCalled()
   expect(integrationJson).not.toHaveBeenCalled()
+  await act(async () => view.unmount())
+})
+
+test('Android primary reads Bilibili on device even with remote video disabled, then generates only after a separate file confirmation', async () => {
+  jest.mocked(deviceBilibiliAvailable).mockReturnValue(true)
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockResolvedValueOnce({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: false })
+  const url = 'https://www.bilibili.com/video/BV1234567890?p=2'
+  const file = { ...libraryFile, id: '12345678-1234-4234-8234-123456789012', category: 'audio' as const, extension: 'm4a', purpose: 'note' as const, source: 'bilibili' as const,
+    bilibiliSource: { platform: 'bilibili' as const, operationId: '12345678-1234-4234-8234-123456789012', originalUrl: url, canonicalUrl: url, bvid: 'BV1234567890', page: 2, aid: '1', cid: '2', duration: 40 } }
+  jest.mocked(readIntake).mockResolvedValue({ mode: 'url', url })
+  jest.mocked(downloadBilibiliAudio).mockReturnValue({ id: file.id, promise: Promise.resolve(file), cancel: jest.fn() })
+  const alert = jest.spyOn(Alert, 'alert')
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+  expect(view.root.findAll(node => node.props.title === '从 B站保存音频')).toHaveLength(0)
+  expect(view.root.findAll(node => node.props.title === '生成总结笔记')).toHaveLength(0)
+  expect(view.root.findAll(node => node.props.title === '读取B站内容')[0].props.disabled).toBe(false)
+  await act(async () => { press(view, '读取B站内容') })
+  expect(downloadBilibiliAudio).not.toHaveBeenCalled()
+  const buttons = alert.mock.calls[0][2]!
+  await act(async () => { buttons.find(button => button.text === '保存音频')!.onPress!(); for (let i = 0; i < 6; i++) await Promise.resolve() })
+  expect(downloadBilibiliAudio).toHaveBeenCalledWith('owner', url, 134217728, expect.any(Function))
+  expect(writeIntake).toHaveBeenLastCalledWith('owner', { mode: 'file', url: '', file })
+  const text = view.root.findAllByType(Text).map(node => node.props.children).flat().join(' ')
+  expect(text).toContain('BV1234567890'); expect(text).toContain(url)
+  expect(submitIntake).not.toHaveBeenCalled(); expect(integrationJson).not.toHaveBeenCalled()
+  expect(view.root.findAll(node => node.props.title === '读取B站内容')).toHaveLength(0)
+  jest.mocked(submitIntake).mockResolvedValueOnce({ ...accepted, mode: 'file', url: '', file })
+  await act(async () => { await press(view, '生成总结笔记') })
+  expect(submitIntake).toHaveBeenCalledTimes(1)
+  expect(submitIntake).toHaveBeenCalledWith('owner', { mode: 'file', url: '', file })
+  expect(integrationJson).not.toHaveBeenCalled()
+  await act(async () => view.unmount()); alert.mockRestore()
+})
+test('device Bilibili primary waits for service readiness, with no download or generation on failure', async () => {
+  jest.mocked(deviceBilibiliAvailable).mockReturnValue(true)
+  jest.mocked(readIntake).mockResolvedValue({ mode: 'url', url: 'https://b23.tv/example' })
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockRejectedValueOnce(new Error('offline'))
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+  expect(view.root.findAll(node => node.props.title === '读取B站内容')[0].props.disabled).toBe(true)
+  await act(async () => { await press(view, '读取B站内容') })
+  expect(downloadBilibiliAudio).not.toHaveBeenCalled(); expect(submitIntake).not.toHaveBeenCalled()
+  await act(async () => view.unmount())
+})
+test('iOS Bilibili asks for file import and never dispatches a URL submission', async () => {
+  jest.replaceProperty(Platform, 'OS', 'ios')
+  jest.mocked(readIntake).mockResolvedValue({ mode: 'url', url: 'https://b23.tv/example' })
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+  expect(view.root.findAllByType(Text).map(node => node.props.children).flat().join(' ')).toContain('iOS 暂不支持，请导入文件')
+  expect(view.root.findAll(node => node.props.title === '生成总结笔记')[0].props.disabled).toBe(true)
+  await act(async () => { await press(view, '生成总结笔记') })
+  expect(downloadBilibiliAudio).not.toHaveBeenCalled(); expect(submitIntake).not.toHaveBeenCalled(); expect(integrationJson).not.toHaveBeenCalled()
+  await act(async () => view.unmount())
+})
+
+test('an existing accepted task never offers device download as an automatic fallback', async () => {
+  jest.mocked(deviceBilibiliAvailable).mockReturnValue(true)
+  jest.mocked(readIntake).mockResolvedValue({ ...accepted, url: 'https://b23.tv/example' })
+  jest.mocked(inspectIntake).mockResolvedValue({ status: { status: 'failed', retryable: false, message: '来源受限' } })
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+  expect(view.root.findAll(node => node.props.title === '从 B站保存音频')).toHaveLength(0)
+  expect(view.root.findAll(node => node.props.title === '读取B站内容')).toHaveLength(0)
+  expect(downloadBilibiliAudio).not.toHaveBeenCalled(); expect(submitIntake).not.toHaveBeenCalled()
   await act(async () => view.unmount())
 })
