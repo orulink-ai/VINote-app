@@ -29,3 +29,8 @@
 - 17 项禁网 Node 脚本检查通过；Node256 TypeScript --noEmit 通过。`git -c core.whitespace=cr-at-eol diff --check` 审核仓库既有 CRLF，通过。
 - 未跑本机完整 App 套件，避免与发布资源冲突；PR 的远端离线 CI 将执行完整套件。本轮未构建、下载模型、调用真实 ASR/LLM、操作设备或修改其他工作区。
 - root 纯提取接口由独立任务交付；协议字段已按 {extraction_protocol,title,text,source_sha256,source_type} 接入，缺失/无效时失败，无旧 worker fallback。未宣称接口部署或两包实测通过。
+
+
+## 提交后安全复核
+
+发现同字节媒体复制到新路径后，完整指纹比较会把它视作新来源。补充以文件 SHA-256+size 识别未知请求别名，不能通过改路径和新 UUID 重发；仅对已有未知请求阻断，不迁移旧任务或替换正常待执行原件。追加离线反例（新路径、新UUID、相同字节），mock模型调用计数仍为1。定向累计183项，版本/协议未扩大。首个提交a4bd8ba的远端CI仍并行中，最终以PR最新HEAD检查为准。

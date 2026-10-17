@@ -12,7 +12,7 @@ import type { IntakeDraft } from '../src/lib/noteIntake'
 jest.mock('../src/config/env', () => ({ API_BASE_URL: 'http://192.168.1.143:9876' }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'alice') }))
 jest.mock('../src/lib/sessionIdentity', () => ({ identityEpoch: () => 1 }))
-jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://content.example', operationId: () => '11111111-1111-4111-8111-111111111111', verifyContentService: jest.fn(async () => ({ text_extraction_protocol: 1, max_upload_bytes: 10000 })), integrationJson: jest.fn() }))
+jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://content.example', operationId: jest.fn(() => '11111111-1111-4111-8111-111111111111'), verifyContentService: jest.fn(async () => ({ text_extraction_protocol: 1, max_upload_bytes: 10000 })), integrationJson: jest.fn() }))
 jest.mock('../src/lib/models', () => ({ loadSelection: jest.fn(async () => ({ asr_model: 'same-asr', llm_model: 'same-llm' })), loadModels: jest.fn(async () => [{ id: 'same-asr', modelType: 'asr', runtimeStatus: 'available' }, { id: 'same-llm', modelType: 'llm', runtimeStatus: 'available' }]) }))
 jest.mock('../src/lib/meetingCloud', () => ({ transcribe: jest.fn(async () => '完整转写') }))
 jest.mock('../src/lib/chatCompletion', () => ({ chatCompletion: jest.fn(async () => ({ choices: [{ message: { content: '# 笔记' }, finish_reason: 'stop' }] })) }))
@@ -173,5 +173,17 @@ test('clearing the intake or changing model IDs cannot launder an unknown source
   jest.mocked(chatCompletion).mockRejectedValueOnce(new Error('lost reply'))
   await launchClientNote('alice', receipt)
   await expect(prepareClientNote('alice', draft)).rejects.toThrow('此来源有未确认')
+  expect(chatCompletion).toHaveBeenCalledTimes(1)
+})
+
+test('copied media with equal bytes cannot hide an unknown request behind a new file path and UUID', async () => {
+  mockOriginal()
+  const receipt = await prepareClientNote('alice', legacyAudio)
+  jest.mocked(chatCompletion).mockRejectedValueOnce(new Error('lost model result'))
+  await launchClientNote('alice', receipt)
+  const api = require('../src/lib/integration') as { operationId: jest.Mock }
+  api.operationId.mockReturnValueOnce('22222222-2222-4222-8222-222222222222')
+  const copied = { ...legacyAudio, file: { ...legacyAudio.file, id: 'new-copy', uri: 'file:///documents/recordings/accounts/alice/new-copy.m4a' } }
+  await expect(prepareClientNote('alice', copied)).rejects.toThrow('此来源有未确认')
   expect(chatCompletion).toHaveBeenCalledTimes(1)
 })

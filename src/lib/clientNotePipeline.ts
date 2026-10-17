@@ -99,7 +99,8 @@ export async function prepareClientNote(owner: string, draft: IntakeDraft): Prom
     if (!raw) continue
     const previous = JSON.parse(raw) as ClientNote
     if (previous.owner !== owner || previous.protocol !== 1 || !previous.source) throw new Error('历史处理记录无法核验，未提交生成')
-    if (JSON.stringify(previous.source) === JSON.stringify(source) && (previous.inFlight || previous.transcription?.version === 5 && previous.transcription.inFlight || previous.status === 'unknown')) throw new Error('此来源有未确认的模型请求，不能另建操作重复发送')
+    const sameContent = source.sha256 && previous.source.sha256 === source.sha256 && previous.source.size === source.size
+    if ((sameContent || JSON.stringify(previous.source) === JSON.stringify(source)) && (previous.inFlight || previous.transcription?.version === 5 && previous.transcription.inFlight || previous.status === 'unknown')) throw new Error('此来源有未确认的模型请求，不能另建操作重复发送')
     if (JSON.stringify(previous.source) === JSON.stringify(source) && previous.status === 'pending') {
       await ownerGuard(owner)
       validate(previous, owner, previous.draft)
