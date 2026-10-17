@@ -9,7 +9,7 @@ import { readAccountId } from '../src/lib/storage'
 
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
 jest.mock('../src/lib/localFiles', () => ({ importLocalFile: jest.fn(), verifyLocalFile: jest.fn(async () => {}) }))
-jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://source.invalid', integrationJson: jest.fn() }))
+jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://source.invalid', verifyContentService: jest.fn(async () => ({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true })), integrationJson: jest.fn() }))
 jest.mock('../src/lib/noteIntake', () => ({ assertIntakeOrigin: jest.fn(), readIntake: jest.fn(), recoverIntake: jest.fn(), submitIntake: jest.fn(), inspectIntake: jest.fn(), writeIntake: jest.fn(async () => {}), intakeFileName: jest.fn(), intakeSourceType: jest.fn() }))
 const pending = { mode: 'url' as const, url: 'https://python.org/about', operationId: 'original', receiptState: 'unknown' as const, uncertain: true }
 const accepted = { ...pending, generationOrigin: 'https://source.invalid', taskId: 'original-task', receiptState: 'accepted' as const, uncertain: false }
@@ -125,4 +125,52 @@ test('production shows source and processing state and retries only the exact un
     expect(recoverIntake).toHaveBeenLastCalledWith('owner', expect.objectContaining({ operationId: 'original', url: pending.url }))
     expect(submitIntake).not.toHaveBeenCalled()
   } finally { if (view) await act(async () => view.unmount()); (globalThis as unknown as { __DEV__: boolean }).__DEV__ = previous }
+})
+
+test('content service readiness is GET-only and retry never submits generation', async () => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  jest.mocked(readIntake).mockResolvedValue({ mode: 'url', url: 'https://python.org/about' })
+  verifyContentService.mockRejectedValueOnce({ code: 'CONTENT_SERVICE_DISABLED', status: 503 }).mockResolvedValue({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true })
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+  expect(view.root.findAllByType(Text).map(node => node.props.children).flat().join(' ')).toContain('服务尚未启用')
+  expect(view.root.findAll(node => node.props.title === '生成总结笔记')[0].props.disabled).toBe(true)
+  expect(submitIntake).not.toHaveBeenCalled()
+  await act(async () => { await press(view, '重新检查服务') })
+  expect(verifyContentService).toHaveBeenCalledTimes(2)
+  expect(view.root.findAllByType(Text).map(node => node.props.children).flat().join(' ')).toContain('内容服务已就绪')
+  expect(view.root.findAll(node => node.props.title === '生成总结笔记')[0].props.disabled).toBe(false)
+  expect(submitIntake).not.toHaveBeenCalled()
+  expect(integrationJson).not.toHaveBeenCalled()
+  await act(async () => view.unmount())
+})
+
+test('a late readiness check cannot update an unmounted import page or submit work', async () => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  let finish!: () => void
+  verifyContentService.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+  jest.mocked(readIntake).mockResolvedValue({ mode: 'url', url: '' })
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+  await act(async () => view.unmount())
+  await act(async () => finish())
+  expect(submitIntake).not.toHaveBeenCalled()
+  expect(integrationJson).not.toHaveBeenCalled()
+})
+
+test.each([
+  [{ mode: 'url', url: 'https://b23.tv/synthetic' }, '导入文件'],
+  [{ mode: 'file', url: '', file: { ...libraryFile, extension: 'mp4', size: 134217729 } }, '128 MB'],
+  [{ mode: 'file', url: '', file: { ...libraryFile, size: 20971521 } }, '20 MB'],
+])('capabilities block unsupported links or oversized files without generation: %j', async (draft, copy) => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockResolvedValueOnce({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: false })
+  jest.mocked(readIntake).mockResolvedValue(draft as never)
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen initialMode={draft.mode as 'url' | 'file'} onBack={jest.fn()} onSaved={jest.fn()} />) })
+  expect(view.root.findAllByType(Text).map(node => node.props.children).flat().join(' ')).toContain(copy)
+  expect(view.root.findAll(node => node.props.title === '生成总结笔记')[0].props.disabled).toBe(true)
+  expect(submitIntake).not.toHaveBeenCalled()
+  expect(integrationJson).not.toHaveBeenCalled()
+  await act(async () => view.unmount())
 })

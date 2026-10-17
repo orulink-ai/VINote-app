@@ -22,6 +22,16 @@ gradle.taskGraph.whenReady { graph ->
 }
 
 def deployment = new groovy.json.JsonSlurper().parse(file("../../config/deployment.json"))
+def checkReleaseContentService = {
+    providers.exec {
+        workingDir rootProject.projectDir.parentFile
+        commandLine 'node', 'scripts/validate-deployment.cjs', '--require-generation'
+    }.result.get().assertNormalExitValue()
+}
+if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }) checkReleaseContentService()
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.project == project && it.name.toLowerCase().contains('release') }) checkReleaseContentService()
+}
 def requestedChannel = project.findProperty('vinoteChannel')
 if (requestedChannel && requestedChannel != (deployment.channel == 'lan' ? 'test' : 'public')) {
     throw new GradleException('Selected deployment does not match requested VINote channel')

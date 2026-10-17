@@ -4,5 +4,6 @@
   "apiBaseUrl": "https://api.orulink.ai",
   "authBaseUrl": "https://supabase-vinote.orulink.ai",
   "accountProxyHost": "",
-  "accountProxyPort": 7890
+  "accountProxyPort": 7890,
+  "generationBaseUrl": "https://supabase-vinote.orulink.ai/vinote-api"
 }

@@ -2,6 +2,7 @@ const { spawnSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 const { selectDeployment } = require('./select-deployment.cjs')
+const { validateDeployment } = require('./validate-deployment.cjs')
 
 const modes = {
   'test:debug': { channel: 'test', appId: 'com.vinoteapp.test', needsMetro: true },
@@ -25,7 +26,8 @@ function planAndroidCommand(mode) {
 
 function run(mode, extraArgs = []) {
   const plan = planAndroidCommand(mode)
-  selectDeployment(plan.channel)
+  const deployment = selectDeployment(plan.channel)
+  validateDeployment(deployment, { requireGeneration: plan.task === 'assembleRelease' || plan.task === 'bundleRelease' })
   let result
   if (plan.needsMetro) {
     const cli = path.join(__dirname, '../node_modules/@react-native-community/cli/build/bin.js')

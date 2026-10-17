@@ -58,3 +58,8 @@
 - 主线程报告 Android Metro BUNDLE 后白屏并已恢复 USB reverse；本任务未操作设备、Metro、进程或网络，不把离线结果当白屏解决依据。
 - 交付准备时将本修复作为完整产品基线之后的独立修复 commit；现在不 commit/add/切换分支。先冻结最终写集，再核对主线程并发修改与当前工作区，避免整文件暂存混入历史脏改。
 - Release 内容处理依旧是明确未配置范围，待有真实受信任服务合同后独立处理，不以本轮原生修复宣称可用。
+
+
+## 后续变更：2026-10-17 Release 内容配置
+
+[显式内容服务与离线CI](../2026-10-17_104109_wugui_无Issue_Release内容服务与离线CI/index.md) 替代本档案“Release generationBaseUrl写死空”的源码现状：新增显式public配置及Bearer capabilities预检。真实部署/内置包仍待主线程核实；不改变本档案iOS原生未验收边界。

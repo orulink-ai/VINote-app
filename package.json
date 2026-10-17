@@ -9,6 +9,7 @@
     "start": "react-native start",
     "test": "jest",
     "config:check": "node scripts/validate-deployment.cjs",
+    "config:check:release": "node scripts/validate-deployment.cjs --require-generation",
     "preandroid": "npm run config:test",
     "preios": "npm run config:test",
     "typecheck": "tsc --noEmit",

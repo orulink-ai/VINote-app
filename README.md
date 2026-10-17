@@ -19,7 +19,7 @@ React Native Community CLI 原生应用，使用统一的 React Native 原生组
 - 同一份录音可反复生成纪要，每次保留为独立的版本 1、版本 2等，录音库可分别打开。纪要支持搜索、Markdown 阅读、改名、删除，并可通过系统分享菜单导出当前版本的 `.md` 文件；删除单份纪要保留原录音及其他版本。同一记录在笔记列表聚合为一条，全部生成版本与编辑历史保留在详情。
 - 会议、笔记及其版本在当前设备管理；已取消跨设备自动同步，客户端不再向 `/api/workspace` 推送或拉取内容。原录音与处理检查点保留在手机，重要音频请先导出；卸载或清除应用数据会丢失设备上的内容与原音。
 - 笔记页“链接或文件转笔记”支持公开视频链接（含 B 站分享文字）及音视频／TXT／MD／SRT／VTT／JSON。先保留选中文件，用户点击生成才上传当前内容服务；已接收任务可返回重入查看，同一任务查询或保存失败不会重新提交生成。PDF/Word、普通文章和需登录文档暂不直接提取。正式包需管理员配置具备生成接口的 integrationBaseUrl；当前开发版使用 USB 转发的电脑服务。
-- 集成请求由 `src/lib/integration.ts` 统一处理：飞书/MCP/插件使用 `deployment.integrationBaseUrl`；链接/文件内容处理使用独立的 `generationBaseUrl`，目前仅 DEBUG 为 `http://127.0.0.1:8900`（USB 开发由主进程建立 adb reverse），Release 未配置并明确不可用。构建脚本不注入内容处理地址，也不会用 VILab 或飞书地址代替。401 最多刷新 token 一次，不绕过鉴权。旧同步说明由下文取消跨设备同步合同替代。
+- 集成请求由 `src/lib/integration.ts` 统一处理：飞书/MCP/插件使用 `integrationBaseUrl`；链接/文件内容处理独立读取 `generationBaseUrl`。public 明确配置 `https://supabase-vinote.orulink.ai/vinote-api`，与集成服务共址但必须通过 Bearer capabilities GET 核验内容角色，不借用 VILab 模型入口。普通 Metro Debug 保留 `127.0.0.1:8900`；standalone 内置 JS 为 dev=false，使用公网配置。导入页只读检查/重试不生成，真正提交前再核验协议、文件上限和视频链接能力。401 最多安全刷新一次，不自动重放未知生成。见[内容服务协议与验收边界](docs/content-service.md)。
 - 共享界面使用原生 Animated：短距离入场、标题揭示、选中 pill、按压反馈和忙时条形 loading；尊重减少动态效果，loading 在后台停止，正文不逐字重播。原生视觉与类型检查由主 agent 串行验收，代码修改不代表已验收。
 
 ## 网络与平台边界
@@ -104,3 +104,9 @@ App 的转写和本机说话人分析并行进行，两路检查点分别保留�
 Android ASR使用专属VINoteASRTransport与ASRSocketCore，不修改RN全局WebSocket。提交计数等待OkHttp真实入队ACK，仍不代表服务端确认；背压有界、拒绝不重发、模型冻结、VLA2完整覆盖与LAST守卫保留。原生错误只持久化白名单数字分类；正常peer close不得覆盖已确认LAST的final。关闭等待reader和socket实际清理。APK从deployment.apiBaseUrl冻结trusted Origin，关闭redirect/retry/ping截止；新JS需要重建匹配APK，旧包阻止新ASR而不静默回退。iOS保留既有路径。离线API编译/真实本机WS测试命令与边界见android/asr-transport-tests/README.md；不能把这些结果当作provider或手机验收。
 
 2026-10-16 录音预算规划只修改 TypeScript，复用已有 MeetingAudio PCM reader，未新增原生方法；本项无需原生重建。正式包需重新打包包含新 JS。后续 22m 真机验收须实际安装对应构建并验证，离线合成 PCM 测试不代表真机或云端提供方通过。
+
+## 内容服务与 CI 证据（2026-10-17）
+
+源码已接入显式 Release 配置、只读就绪检查和服务端上传预算。公网 URL 配置不证明部署成功；capabilities 就绪不证明 LLM/ASR、文件或链接完整生成。当前公网禁用视频 URL（出站下载隔离未就绪），请导入媒体文件；PDF/DOCX 不超过 20 MiB，其他上传按服务返回的 max_upload_bytes（计划默认 128 MiB）。
+
+PR10 检查时没有任何 workflow，GitHub Actions API 返回 0 个 workflow、PR checks 为空；Actions 已启用且允许全部 actions，缺少 workflow 是当前可确认原因。本次新增 App offline checks：安装锁定依赖后，仅校验配置、脚本、TypeScript 和单 worker Jest，业务网络由测试进程守卫禁止。源码/本地离线结果、GitHub 运行结果、服务部署和手机验收分别记录；尚未推送前不宣称 CI 已运行。iOS 未构建或真机验收，本轮不发 LLM/ASR/生成请求。

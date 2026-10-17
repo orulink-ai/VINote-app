@@ -59,7 +59,7 @@ Root verification (2026-10-12): `useTrustedSession` may expose local content whi
 `MeetingMarkdown` 的图片规则使用全宽块容器；外链图片逐张确认后加载，说明、状态与重试保留，账号/来源/正文切换重置确认。当前设备截图仅允许固定任务图片路径并按账号读取；原始文件、模型凭证不作为图片附件或普通同步数据发送。
 
 导航为内容 / 项目 / 我的，由 App 根组件唯一拥有。详情、飞书与 MCP 等流程页隐藏底栏。ProjectsScreen 从真实 project 元数据派生过滤视图，项目→内容→详情返回保留项目上下文。本机原件从内容或我的进入，不复制完成纪要为录音历史；旧 RecordingWorkbenchScreen 已删除。全局任务入口在三个主页面均可进入，返回实际来源页。ScreenHeader 是唯一页面标题区；我的区分账号、模型、数据、原件、连接与外观，飞书/MCP 归连接目录。卡片无障碍标签只含标题/状态，不含整段纪要。BottomActionSheet 管理单任务与内部步骤，系统返回先回上一步；目录读取失败保留位置并重试同一目录。
-`integration.ts` 区分公网 workspace/飞书/MCP/内容插件与内容生成服务；前者使用 deployment.integrationBaseUrl，DEBUG 内容生成使用 loopback:8900（USB reverse），release 内容生成目前未配置，不得宣称独立公网生成已完成。Bearer 支持一次安全 401 refresh。workspaceStorage 保存账号隔离的文件系统缓存与源映射，AsyncStorage 只保存小型索引，workspace.ts 通过严格字段映射写入元数据和转写，绝不上传原音路径。版本 evidence_revision 只读；历史证据按引用读取，无引用明确说明。来源日期用 source_created_at，不把首次同步时间当历史日期。所有生成与编辑历史保留，列表按录音聚合。登录/恢复只做文本同步，不自动重跑语音。
+`integration.ts` 区分公网 workspace/飞书/MCP/内容插件与内容生成服务；前者使用 deployment.integrationBaseUrl，DEBUG 内容生成使用 loopback:8900（USB reverse），release 内容生成显式读取 deployment.generationBaseUrl，public 为与 integration 同址的受限内容 runtime；必须通过 Bearer capabilities GET 协议1/generation=true/sync=false/max_upload_bytes/video_url 核验，不得仅凭 URL 宣称部署或生成验收成功。Bearer 支持一次安全 401 refresh。workspaceStorage 保存账号隔离的文件系统缓存与源映射，AsyncStorage 只保存小型索引，workspace.ts 通过严格字段映射写入元数据和转写，绝不上传原音路径。版本 evidence_revision 只读；历史证据按引用读取，无引用明确说明。来源日期用 source_created_at，不把首次同步时间当历史日期。所有生成与编辑历史保留，列表按录音聚合。登录/恢复只做文本同步，不自动重跑语音。
 
 动效参考 Amicro 的画布/卡片层级、pill 与 cubic(.16,1,.3,1)，使用 React Native Animated 原生驱动；不安装其网页 gallery/CLI。Uiverse JkHuger 条形 scaleY loader 仅忙时使用，最多四轮，AppState inactive/background 时停止，active 后恢复短动画。正文不逐字动画，系统减少动效开启时静态显示。保留系统字缩放和至少 44dp 触控目标。详见本次开发档案的来源与验收边界。
 
@@ -95,3 +95,10 @@ NoteIntakeScreen 的旧任务缺模型快照 409 使用 `/api/task/{id}/model-co
 SummaryCheckpoint v11仅以相同model/title/source复用完整draft/audit；v8-v10旧记录对象不修改，不把旧facts/merge或分段草稿当成全文结果。summary模型变更必须由调用者显式确认并冻结到独立summary操作，不修改原ASR snapshot/owner/来源；已有完整ASR+speaker只读复用，不能借总结失败重跑。恢复入口、未知操作阻止自动提交与新summary记录的持久边界由recording recovery负责；本次未改该层/UI。原有身份guard、顺序保存、失败不保存未审核正文继续生效。
 
 源码/离线证据：documents/dev_log/2026-10-16/2026-10-16_174109_wugui_无Issue_App全文总结/index.md。无需新native构建；69条离线测试不代表手机/付费LLM验收。父端负责后续reload和实际调用，本代理未操作设备或云端。
+
+
+## 2026-10-17 Release 内容服务
+
+`src/config/generationService.js` 是构建和 RN 共享的纯配置校验器。仅普通 Metro dev=true 用 USB loopback；Android standalone 通过 debuggableVariants=[] 的既有 RN Gradle bundler devEnabled=false 使用公网 JSON，无新增 native 常量。Release 打包与直接 Gradle Release 均要求显式内容地址；不能回退 VILab。共址集成入口必须由无推理 capabilities GET 证明内容角色。
+
+导入页核验/重试仅 GET，生成前重新校验；所有 production 内容 JSON 请求均先预检，Feishu/MCP 不受内容启用状态阻断。caps 必须 protocol1、generation=true、sync=false、正整数 max_upload_bytes 与 boolean video_url。PDF/DOCX 取服务上限和20MiB较小值。video_url=false时明确视频站/媒体链接在提交前阻止，普通网页走服务端安全提取；这不是出站隔离的替代。未知提交仍只查询，换服务不会重放。参阅 docs/content-service.md；未部署、未真机核实时如实保留边界。

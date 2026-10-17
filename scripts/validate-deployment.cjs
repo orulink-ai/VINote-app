@@ -1,10 +1,11 @@
 const { isIP } = require('node:net')
+const { validateGenerationBaseUrl } = require('../src/config/generationService')
 function publicHost(host) {
   host = host.toLowerCase().replace(/\.$/, '')
   return !isIP(host.replace(/^\[|\]$/g, '')) && host.includes('.') &&
     !/(^|\.)(localhost|local|internal|test|invalid|example|home\.arpa)$/.test(host)
 }
-function validateDeployment(config) {
+function validateDeployment(config, { requireGeneration = false } = {}) {
   if (!['lan', 'public'].includes(config.channel)) throw new Error('未知部署通道')
   for (const key of ['apiBaseUrl', 'authBaseUrl', ...(config.integrationBaseUrl ? ['integrationBaseUrl'] : [])]) {
     const url = new URL(config[key])
@@ -16,10 +17,16 @@ function validateDeployment(config) {
   if (typeof config.accountProxyHost !== 'string' || !/^[a-zA-Z0-9.-]*$/.test(config.accountProxyHost)) throw new Error('代理主机无效')
   if (!Number.isInteger(config.accountProxyPort) || config.accountProxyPort < 1 || config.accountProxyPort > 65535) throw new Error('代理端口无效')
   if (config.channel === 'public' && config.accountProxyHost) throw new Error('公网包不能依赖内网账号代理')
+  validateGenerationBaseUrl(config, { required: requireGeneration })
   return config
 }
 module.exports = { validateDeployment }
 if (require.main === module) {
+  if (process.argv.includes('--require-generation')) {
+    const config = require('../config/deployment.json')
+    if (config.channel !== 'public') throw new Error('Release 必须选择 public 通道')
+    validateDeployment(config, { requireGeneration: true })
+  }
   validateDeployment(require('../config/deployment.test.json'))
   validateDeployment(require('../config/deployment.public.json'))
   console.log("测试版和正式版配置检查通过（不代表网络连通性已验证）")

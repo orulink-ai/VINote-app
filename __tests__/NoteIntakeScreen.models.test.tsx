@@ -13,7 +13,7 @@ import { ApiError } from '../src/lib/errors'
 
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn() }))
 jest.mock('../src/lib/localFiles', () => ({ importLocalFile: jest.fn(), verifyLocalFile: jest.fn() }))
-jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://generation.example', integrationJson: jest.fn() }))
+jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://generation.example', verifyContentService: jest.fn(async () => ({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true })), integrationJson: jest.fn() }))
 jest.mock('../src/lib/noteIntake', () => ({ readIntake: jest.fn(), writeIntake: jest.fn(), inspectIntake: jest.fn(), recoverIntake: jest.fn(), submitIntake: jest.fn(), intakeFileName: jest.fn(), intakeSourceType: jest.fn() }))
 
 const context = {

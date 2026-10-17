@@ -8,7 +8,7 @@ import { saveSourceNote } from '../src/lib/notes'
 import { listLocalFileAssociations } from '../src/lib/localFileAssociations'
 
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
-jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'http://127.0.0.1:8900', integrationJson: jest.fn(), operationId: () => '11111111-1111-4111-8111-111111111111' }))
+jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'http://127.0.0.1:8900', verifyContentService: jest.fn(async () => ({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true })), integrationJson: jest.fn(), operationId: () => '11111111-1111-4111-8111-111111111111' }))
 jest.mock('../src/lib/notes', () => ({ saveSourceNote: jest.fn() }))
 const api = integrationJson as jest.Mock
 const taskId = '12345678-1234-4234-8234-123456789012'
@@ -133,4 +133,28 @@ it('double submission shares one protected operation and one request', async () 
   const [first, second] = await Promise.all([submitIntake('owner', draft), submitIntake('owner', draft)])
   expect(second).toEqual(first)
   expect(api).toHaveBeenCalledTimes(1)
+})
+
+test.each([['mp4', 134217729, '128 MB'], ['pdf', 20971521, '20 MB'], ['docx', 20971521, '20 MB']])('rejects %s above the advertised upload budget before POST or unknown receipt', async (extension, size, copy) => {
+  jest.mocked(FS.stat).mockResolvedValue({ size } as never)
+  const file = { id: taskId, extension, uri: `file:///documents/files/accounts/owner/${taskId}.${extension}`, name: `source.${extension}`, category: 'file' as const, size, createdAt: '2026-10-17' }
+  await expect(submitIntake('owner', { mode: 'file', url: '', file })).rejects.toThrow(copy)
+  expect(api).not.toHaveBeenCalled()
+  expect((await readIntake('owner')).operationId).toBeUndefined()
+})
+
+test('failed service preflight never persists an unknown submission or POSTs', async () => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockRejectedValueOnce(new Error('service unavailable'))
+  await expect(submitIntake('owner', { mode: 'url', url: 'https://python.org/about' })).rejects.toThrow('service unavailable')
+  expect(api).not.toHaveBeenCalled()
+  expect((await readIntake('owner')).operationId).toBeUndefined()
+})
+
+test.each(['https://b23.tv/synthetic', 'https://www.bilibili.com/video/synthetic', 'https://youtu.be/synthetic', 'https://media.example/demo.mp4'])('disabled video URL capability rejects %s before source POST', async url => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockResolvedValueOnce({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: false, video_url_reason: 'DOWNLOAD_EGRESS_NOT_ENFORCED' })
+  await expect(submitIntake('owner', { mode: 'url', url })).rejects.toThrow('导入文件')
+  expect(api).not.toHaveBeenCalled()
+  expect((await readIntake('owner')).operationId).toBeUndefined()
 })

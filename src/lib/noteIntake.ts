@@ -1,12 +1,13 @@
 import Storage from '@react-native-async-storage/async-storage'
 import FS from 'react-native-fs'
-import { generationBaseUrl, integrationJson, operationId } from './integration'
+import { generationBaseUrl, integrationJson, operationId, verifyContentService } from './integration'
 import { ApiError } from './errors'
 import { readAccountId } from './storage'
 import { saveSourceNote } from './notes'
 import type { LocalFile } from './localFiles'
 import type { LocalRecording } from '../features/recording/recordingLibrary'
 import { advanceLocalFileAssociation, beginLocalFileAssociation, markLocalFileDispatch } from './localFileAssociations'
+import { isExplicitVideoUrl } from './intakeCapabilities'
 
 export type IntakeFile = LocalFile | LocalRecording
 export type IntakeDraft = { retryUncertain?: boolean; modelConfirmationRequired?: boolean; mode: 'url' | 'file'; url: string; file?: IntakeFile; taskId?: string; sourceType?: string; uncertain?: boolean; operationId?: string; receiptState?: 'unknown' | 'reserved' | 'accepted'; recoverySupported?: boolean; generationOrigin?: string; submittedAt?: string }
@@ -61,9 +62,13 @@ async function submitSource(owner: string, draft: IntakeDraft): Promise<IntakeDr
   assertIntakeOrigin(draft)
   if (draft.taskId && draft.receiptState !== 'reserved') return draft
   if (draft.operationId || draft.uncertain) return recoverIntake(owner, draft)
+  if (!generationBaseUrl) throw new Error('当前内容处理服务尚未配置；原文件保留在此设备')
+  const service = await verifyContentService(owner)
+  await guard(owner)
   let body: string | FormData, path: string, sourceType: string
   if (draft.mode === 'url') {
     const url = intakeUrl(draft.url)
+    if (!service.video_url && isExplicitVideoUrl(url)) throw new Error('暂不支持视频或音频链接，请下载后导入文件。普通网页、PDF 和 Word 链接仍可使用。')
     body = JSON.stringify({ video_url: url, platform: 'auto', workflow: 'note_organization', style: 'detailed', summary_mode: 'default', output_language: 'zh-CN' })
     path = '/api/generate'; sourceType = 'video'
   } else {
@@ -74,8 +79,9 @@ async function submitSource(owner: string, draft: IntakeDraft): Promise<IntakeDr
     const expected = `file://${FS.DocumentDirectoryPath}/${folder}/accounts/${encodeURIComponent(owner)}/${file.id}.${extension}`
     if (!/^[a-zA-Z0-9-]+$/.test(file.id) || file.uri !== expected) throw new Error('文件不属于当前账号，请重新选择')
     const stat = await FS.stat(file.uri.replace('file://', ''))
-    if (!Number(stat.size) || Number(stat.size) > 2 * 1024 * 1024 * 1024) throw new Error('请选择 2 GB 以内的非空文件')
-    if (sourceType === 'document' && Number(stat.size) > 20 * 1024 * 1024) throw new Error('PDF 和 Word 文件不能超过 20 MB')
+    const limit = Math.min(service.max_upload_bytes, sourceType === 'document' ? 20 * 1024 * 1024 : Infinity)
+    if (!Number.isFinite(Number(stat.size)) || Number(stat.size) <= 0) throw new Error('请选择非空文件')
+    if (Number(stat.size) > limit) throw new Error(`当前文件超过服务上限（${Math.floor(limit / 1024 / 1024)} MB），请另选文件；原文件保留在文件库。`)
     const form = new FormData()
     form.append('file', { uri: draft.file.uri, name: intakeFileName(draft.file), type: sourceType === 'document' ? (extension === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') : sourceType === 'transcript' ? 'text/plain' : sourceType === 'video' ? 'video/mp4' : 'audio/mp4' } as unknown as Blob)
     form.append('source_type', sourceType); form.append('title', intakeFileName(draft.file))
@@ -83,7 +89,6 @@ async function submitSource(owner: string, draft: IntakeDraft): Promise<IntakeDr
     form.append('summary_mode', 'default'); form.append('output_language', 'zh-CN')
     body = form; path = '/api/generate_from_upload'
   }
-  if (!generationBaseUrl) throw new Error('当前内容处理服务尚未配置；原文件保留在此设备')
   const pending: IntakeDraft = { ...draft, submittedAt: new Date().toISOString(), sourceType: sourceType === 'document' ? 'file' : sourceType, operationId: operationId(), generationOrigin: generationBaseUrl, receiptState: 'unknown', uncertain: true }
   if (pending.mode === 'file' && pending.file && 'name' in pending.file) await beginLocalFileAssociation(owner, pending.file, pending.operationId!)
   // Fail closed on local persistence failure: do not dispatch an unprotected POST.
