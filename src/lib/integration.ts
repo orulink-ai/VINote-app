@@ -5,11 +5,12 @@ import { accessToken } from './supabase'
 import { ApiError } from './errors'
 import { remoteRequest } from './remoteRequest'
 import { resolveGenerationBaseUrl } from '../config/generationService'
+import { isExplicitVideoUrl, isVideoUrlAllowed, validVideoUrlPlatforms, videoUrlUnavailableMessage } from './intakeCapabilities'
 
 export const integrationBaseUrl = (deployment.integrationBaseUrl || '').replace(/\/+$/, '')
 export const generationBaseUrl = resolveGenerationBaseUrl(deployment, __DEV__)
 const capabilitiesPath = '/api/content-service/capabilities'
-export type ContentServiceCapabilities = { content_service_protocol: 1; generation: true; sync: false; max_upload_bytes: number; video_url: boolean; video_url_reason?: string }
+export type ContentServiceCapabilities = { content_service_protocol: 1; generation: true; sync: false; max_upload_bytes: number; video_url: boolean; video_url_reason?: string; video_url_platforms?: string[]; video_source_preflight?: 1 }
 const integrationPath = (path: string) => /^\/api\/(workspace(?:\/|$)|feishu(?:\/|$)|mcp-connections(?:\/|$)|plugins(?:\/|$))/.test(path)
 export function integrationOrigin(path: string) {
   return integrationPath(path) ? integrationBaseUrl : generationBaseUrl
@@ -20,6 +21,8 @@ function assertContentCapabilities(value: unknown) {
   if (data.generation !== true) throw new IntegrationError('内容处理服务尚未启用生成，请联系管理员；原资料与任务记录保留。', 503, 'CONTENT_SERVICE_DISABLED')
   if (!Number.isSafeInteger(data.max_upload_bytes) || Number(data.max_upload_bytes) <= 0) throw new IntegrationError('内容处理服务缺少有效文件上限，请联系管理员更新。', 503, 'CONTENT_SERVICE_PROTOCOL_UNSUPPORTED')
   if (typeof data.video_url !== 'boolean') throw new IntegrationError('内容处理服务缺少有效链接处理规则，请联系管理员更新。', 503, 'CONTENT_SERVICE_PROTOCOL_UNSUPPORTED')
+  if ('video_url_platforms' in data && !validVideoUrlPlatforms(data.video_url_platforms)) throw new IntegrationError('内容处理服务的视频平台规则无效，请联系管理员更新。', 503, 'CONTENT_SERVICE_PROTOCOL_UNSUPPORTED')
+  if ('video_source_preflight' in data && data.video_source_preflight !== 1) throw new IntegrationError('内容处理服务的来源预检协议不兼容，请联系管理员更新。', 503, 'CONTENT_SERVICE_PROTOCOL_UNSUPPORTED')
 }
 function contentUnavailable(status: number) {
   return new IntegrationError(
@@ -73,6 +76,13 @@ export async function integrationJson<T>(path: string, init: RequestInit = {}, e
     try { capabilities = await probe.json() } catch { capabilities = null }
     lifetime.guard(); extraGuard?.()
     assertContentCapabilities(capabilities)
+    if (path === '/api/generate' && (init.method || 'GET').toUpperCase() === 'POST' && typeof init.body === 'string') {
+      let source: unknown
+      try { source = JSON.parse(init.body)?.video_url } catch { /* Backend validates malformed source bodies. */ }
+      if (typeof source === 'string' && isExplicitVideoUrl(source) && !isVideoUrlAllowed(source, capabilities as ContentServiceCapabilities)) {
+        throw new IntegrationError(videoUrlUnavailableMessage(capabilities as ContentServiceCapabilities), 400, 'VIDEO_URL_PLATFORM_UNAVAILABLE')
+      }
+    }
   }
   let response = await request()
   // Authentication rejection happens before dispatch. No retries on transport errors.

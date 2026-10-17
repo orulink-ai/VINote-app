@@ -7,7 +7,7 @@ import { saveSourceNote } from './notes'
 import type { LocalFile } from './localFiles'
 import type { LocalRecording } from '../features/recording/recordingLibrary'
 import { advanceLocalFileAssociation, beginLocalFileAssociation, markLocalFileDispatch } from './localFileAssociations'
-import { isExplicitVideoUrl } from './intakeCapabilities'
+import { isBilibiliUrl, isExplicitVideoUrl, isVideoUrlAllowed, videoUrlUnavailableMessage } from './intakeCapabilities'
 
 export type IntakeFile = LocalFile | LocalRecording
 export type IntakeDraft = { retryUncertain?: boolean; modelConfirmationRequired?: boolean; mode: 'url' | 'file'; url: string; file?: IntakeFile; taskId?: string; sourceType?: string; uncertain?: boolean; operationId?: string; receiptState?: 'unknown' | 'reserved' | 'accepted'; recoverySupported?: boolean; generationOrigin?: string; submittedAt?: string }
@@ -68,7 +68,12 @@ async function submitSource(owner: string, draft: IntakeDraft): Promise<IntakeDr
   let body: string | FormData, path: string, sourceType: string
   if (draft.mode === 'url') {
     const url = intakeUrl(draft.url)
-    if (!service.video_url && isExplicitVideoUrl(url)) throw new Error('暂不支持视频或音频链接，请下载后导入文件。普通网页、PDF 和 Word 链接仍可使用。')
+    if (isExplicitVideoUrl(url) && !isVideoUrlAllowed(url, service)) throw new Error(videoUrlUnavailableMessage(service))
+    if (service.video_source_preflight === 1 && isBilibiliUrl(url)) {
+      // Read-only source validation: no operation identity or generation work.
+      await integrationJson('/api/content-service/video-source', { method: 'POST', body: JSON.stringify({ url }) }, owner, 60000)
+      await guard(owner)
+    }
     body = JSON.stringify({ video_url: url, platform: 'auto', workflow: 'note_organization', style: 'detailed', summary_mode: 'default', output_language: 'zh-CN' })
     path = '/api/generate'; sourceType = 'video'
   } else {

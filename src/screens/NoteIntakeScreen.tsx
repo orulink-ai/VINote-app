@@ -15,7 +15,7 @@ import { colors, styles } from '../design-system/theme'
 import { readAccountId } from '../lib/storage'
 import { importLocalFile, verifyLocalFile, type LocalFile } from '../lib/localFiles'
 import { generationBaseUrl, integrationJson, verifyContentService } from '../lib/integration'
-import { isExplicitVideoUrl } from '../lib/intakeCapabilities'
+import { allowsBilibili, isExplicitVideoUrl, isVideoUrlAllowed, videoUrlUnavailableMessage, type VideoUrlCapabilities } from '../lib/intakeCapabilities'
 import { intakeHistoryRecord, sameIntakeHistoryTarget, type IntakeHistoryTarget } from '../lib/intakeHistory'
 import { assertIntakeOrigin, inspectIntake, intakeFileName, intakeSourceType, readIntake, recoverIntake, submitIntake, writeIntake, type IntakeDraft } from '../lib/noteIntake'
 
@@ -32,7 +32,7 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
   const [serviceState, setServiceState] = useState<'checking' | 'ready' | 'failed'>('checking')
   const [serviceError, setServiceError] = useState('')
   const [uploadLimit, setUploadLimit] = useState<number | null>(null)
-  const [videoLinksAvailable, setVideoLinksAvailable] = useState<boolean | null>(null)
+  const [videoCapabilities, setVideoCapabilities] = useState<VideoUrlCapabilities | null>(null)
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [modelSheet, setModelSheet] = useState(false), [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState(''), [modelContext, setModelContext] = useState<IntakeModelContext | null>(null)
@@ -111,10 +111,10 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
     if (!ready) return
     let active = true
     const account = owner.current
-    setServiceState('checking'); setServiceError(''); setUploadLimit(null); setVideoLinksAvailable(null)
+    setServiceState('checking'); setServiceError(''); setUploadLimit(null); setVideoCapabilities(null)
     const guard = () => { if (!active || !mounted.current || owner.current !== account) throw new Error('页面或账号已变化') }
     void verifyContentService(account, guard).then(capabilities => {
-      if (active && mounted.current) { setUploadLimit(capabilities.max_upload_bytes); setVideoLinksAvailable(capabilities.video_url); setServiceState('ready') }
+      if (active && mounted.current) { setUploadLimit(capabilities.max_upload_bytes); setVideoCapabilities(capabilities); setServiceState('ready') }
     }).catch((cause: { code?: string; status?: number }) => {
       if (!active || !mounted.current) return
       setServiceState('failed')
@@ -274,7 +274,10 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
   const awaitingLibraryChoice = !!initialFile && draft.file?.id !== initialFile.id && !continueExisting
   const fileLimit = uploadLimit === null ? null : Math.min(uploadLimit, draft.file && ['pdf', 'docx'].includes(draft.file.extension || '') ? 20 * 1024 * 1024 : Infinity)
   const fileTooLarge = draft.mode === 'file' && draft.file && 'size' in draft.file && fileLimit !== null && draft.file.size > fileLimit
-  const videoLinkBlocked = draft.mode === 'url' && videoLinksAvailable === false && isExplicitVideoUrl(draft.url)
+  const videoLinkBlocked = draft.mode === 'url' && videoCapabilities !== null && isExplicitVideoUrl(draft.url) && !isVideoUrlAllowed(draft.url, videoCapabilities)
+  const legacyVideoLinks = videoCapabilities?.video_url === true && videoCapabilities.video_url_platforms === undefined
+  const bilibiliLinks = videoCapabilities !== null && allowsBilibili(videoCapabilities) && !legacyVideoLinks
+  const linkLabel = bilibiliLinks ? '网页、B站或文档链接' : legacyVideoLinks ? '网页或视频链接' : '网页或文档链接'
   return <View style={styles.screen}>
     <ScreenHeader title="链接或文件转笔记" onBack={leave} backLabel={backLabel} disabled={busy} />
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, gap: 20 }}>
@@ -286,12 +289,12 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
       {awaitingLibraryChoice && <View style={styles.card}><Text style={styles.noteTitle}>所选文件：{initialFile!.name}</Text><Text style={styles.subtitle}>另有一份来源已保留：{draft.file ? intakeFileName(draft.file) : draft.url || '原提交'}。请选择要继续的内容，尚未提交所选文件。</Text><PrimaryButton title="使用文件库中的文件" disabled={busy || !ready} onPress={useLibraryFile} /><PrimaryButton secondary title="继续原来源" disabled={busy || !ready} onPress={() => setContinueExisting(true)} /></View>}
       {!!recoveredNoteId && <PrimaryButton secondary title="查看原任务生成的笔记" onPress={() => onSaved(recoveredNoteId)} />}
       {!awaitingLibraryChoice && !draft.taskId && <>
-        <View style={{ flexDirection: 'row', gap: 8 }}>{(['url', 'file'] as const).map(mode => <Pressable key={mode} accessibilityRole="tab" accessibilityState={{ selected: draft.mode === mode }} disabled={busy || !ready || !!draft.operationId || draft.uncertain} onPress={() => { accept({ ...draft, mode }); setError(''); setMessage('') }} style={{ minHeight: 44, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: draft.mode === mode ? colors.primarySoft : colors.card }}><Text style={styles.noteTitle}>{mode === 'url' ? (videoLinksAvailable === true ? '网页或视频链接' : '网页或文档链接') : '本地文件'}</Text></Pressable>)}</View>
-        {draft.mode === 'url' ? <View style={{ gap: 10 }}><Field label={videoLinksAvailable === true ? "网页或视频链接" : "网页或文档链接"} value={draft.url} editable={!busy && ready && !draft.operationId && !draft.uncertain} multiline onChangeText={url => accept({ ...draft, url })} placeholder={videoLinksAvailable === true ? "粘贴网页、视频或文档链接" : "粘贴网页、PDF 或 Word 链接"} /><Text style={styles.subtitle}>{videoLinksAvailable === true ? '支持普通网页、公开视频、PDF 和 DOCX 文档链接。' : '支持普通网页、PDF 和 DOCX 文档链接；视频或音频请导入文件。'}登录或动态网页请导出文件再导入。</Text></View>
+        <View style={{ flexDirection: 'row', gap: 8 }}>{(['url', 'file'] as const).map(mode => <Pressable key={mode} accessibilityRole="tab" accessibilityState={{ selected: draft.mode === mode }} disabled={busy || !ready || !!draft.operationId || draft.uncertain} onPress={() => { accept({ ...draft, mode }); setError(''); setMessage('') }} style={{ minHeight: 44, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: draft.mode === mode ? colors.primarySoft : colors.card }}><Text style={styles.noteTitle}>{mode === 'url' ? linkLabel : '本地文件'}</Text></Pressable>)}</View>
+        {draft.mode === 'url' ? <View style={{ gap: 10 }}><Field label={linkLabel} value={draft.url} editable={!busy && ready && !draft.operationId && !draft.uncertain} multiline onChangeText={url => accept({ ...draft, url })} placeholder={bilibiliLinks ? "粘贴 B 站、b23.tv、网页或文档链接" : legacyVideoLinks ? "粘贴网页、视频或文档链接" : "粘贴网页、PDF 或 Word 链接"} /><Text style={styles.subtitle}>{bilibiliLinks ? '支持 B 站与 b23.tv 视频、普通网页、PDF 和 DOCX 链接；其他视频或音频请导入文件。' : legacyVideoLinks ? '支持普通网页、公开视频、PDF 和 DOCX 文档链接。' : '支持普通网页、PDF 和 DOCX 文档链接；视频或音频请导入文件。'}登录或动态网页请导出文件再导入。</Text></View>
           : <View style={[styles.card, { gap: 12 }]}><Text style={styles.noteTitle}>{draft.file ? intakeFileName(draft.file) : '选择要整理的文件'}</Text><Text style={styles.subtitle}>PDF、Word DOCX、音视频、文字与字幕。{uploadLimit !== null ? `上传限 ${Math.floor(uploadLimit / 1024 / 1024)} MB；PDF 和 Word 限 ${Math.floor(Math.min(uploadLimit, 20 * 1024 * 1024) / 1024 / 1024)} MB。` : '文件上限将在服务检查后显示。'}PDF 限 200 页；扫描 PDF 请先识别文字。选择后先保存在文件库，点击生成才上传处理。</Text><PrimaryButton secondary title={draft.file ? '重新选择文件' : '选择文件'} disabled={busy || !ready || !!draft.operationId || draft.uncertain} onPress={() => void choose()} /></View>}
       </>}
       {!!fileTooLarge && <AsyncState error={`当前文件超过 ${Math.floor(fileLimit! / 1024 / 1024)} MB 上限，请另选文件。原文件仍保留。`} />}
-      {videoLinkBlocked && <AsyncState error="暂不支持视频或音频链接，请下载后导入文件。" />}
+      {videoLinkBlocked && <AsyncState error={videoUrlUnavailableMessage(videoCapabilities!)} />}
       {!awaitingLibraryChoice && draft.taskId && <>
         <Text accessibilityRole="header" accessibilityLiveRegion="polite" style={styles.noteTitle}>{draft.retryUncertain ? '原任务重试结果待确认' : terminal ? '处理未完成，原来源保留' : '正在整理笔记'}</Text>
         {!terminal && <ProcessingProgress label="整理笔记" percent={taskProgress} unknownLabel="正在查询原任务，暂未提供可计量进度" />}

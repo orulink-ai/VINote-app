@@ -107,6 +107,6 @@ Android ASR使用专属VINoteASRTransport与ASRSocketCore，不修改RN全局Web
 
 ## 内容服务与 CI 证据（2026-10-17）
 
-源码已接入显式 Release 配置、只读就绪检查和服务端上传预算。公网 URL 配置不证明部署成功；capabilities 就绪不证明 LLM/ASR、文件或链接完整生成。当前公网禁用视频 URL（出站下载隔离未就绪），请导入媒体文件；PDF/DOCX 不超过 20 MiB，其他上传按服务返回的 max_upload_bytes（计划默认 128 MiB）。
+源码已接入显式 Release 配置、只读就绪检查和服务端上传预算。公网 URL 配置不证明部署成功；capabilities 就绪不证明 LLM/ASR、文件或链接完整生成。视频链接按后端声明的 `video_url_platforms` 限定：新代码支持仅 B 站/b23.tv 开放，其他视频请导入文件；实际部署/完整生成仍待验收。旧设备服务没有平台列表时沿用 `video_url` 布尔；PDF/DOCX 不超过 20 MiB，其他上传按服务返回的 max_upload_bytes（计划默认 128 MiB）。
 
 PR10 检查时没有任何 workflow，GitHub Actions API 返回 0 个 workflow、PR checks 为空；Actions 已启用且允许全部 actions，缺少 workflow 是当前可确认原因。本次新增 App offline checks：安装锁定依赖后，仅校验配置、脚本、TypeScript 和单 worker Jest，业务网络由测试进程守卫禁止。源码/本地离线结果、GitHub 运行结果、服务部署和手机验收分别记录；尚未推送前不宣称 CI 已运行。iOS 未构建或真机验收，本轮不发 LLM/ASR/生成请求。

@@ -114,3 +114,62 @@ test('public URL configuration also validates with the actual React Native URL p
     expect(release().generationBaseUrl).toBe('https://account.vinote.app/vinote-api')
   } finally { globalThis.URL = original }
 })
+
+test.each([null, 'bilibili', { bilibili: true }, [null], ['BILIBILI'], ['bilibili', 'bilibili'], ['*']])('malformed platform rules %j fail before content POST', async video_url_platforms => {
+  const api = release()
+  const request = jest.spyOn(globalThis, 'fetch').mockResolvedValue(reply({ ...capabilities, video_url_platforms }))
+  await expect(api.integrationJson('/api/generate', { method: 'POST', body: JSON.stringify({ video_url: 'https://b23.tv/synthetic' }) }, 'alice')).rejects.toMatchObject({ code: 'CONTENT_SERVICE_PROTOCOL_UNSUPPORTED' })
+  expect(request).toHaveBeenCalledTimes(1)
+})
+
+test.each([
+  ['https://b23.tv/synthetic', true],
+  ['https://www.bilibili.com/video/BVsynthetic', true],
+  ['https://youtu.be/synthetic', false],
+  ['https://media.example/synthetic.mp4', false],
+])('public API rechecks explicit Bilibili platform scope for %s', async (url, allowed) => {
+  const api = release()
+  const request = jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(reply({ ...capabilities, video_url: true, video_url_platforms: ['bilibili'] })).mockResolvedValueOnce(reply({ task_id: 'synthetic' }))
+  const work = api.integrationJson('/api/generate', { method: 'POST', body: JSON.stringify({ video_url: url }) }, 'alice')
+  if (allowed) await expect(work).resolves.toEqual({ task_id: 'synthetic' })
+  else await expect(work).rejects.toMatchObject({ code: 'VIDEO_URL_PLATFORM_UNAVAILABLE' })
+  expect(request).toHaveBeenCalledTimes(allowed ? 2 : 1)
+})
+
+test('Bilibili capability is not a success guarantee: source 412 stays visible and never replays POST', async () => {
+  const api = release()
+  const detail = '源站暂时拒绝访问（HTTP 412），请稍后核验或导入文件。'
+  const request = jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(reply({ ...capabilities, video_url: true, video_url_platforms: ['bilibili'] })).mockResolvedValueOnce(reply({ detail }, 412))
+  await expect(api.integrationJson('/api/generate', { method: 'POST', body: JSON.stringify({ video_url: 'https://www.bilibili.com/video/BVsynthetic' }) }, 'alice')).rejects.toMatchObject({ status: 412, message: detail })
+  expect(request).toHaveBeenCalledTimes(2)
+  expect(request.mock.calls.filter(call => call[1]?.method === 'POST')).toHaveLength(1)
+})
+
+test.each(['https://b23.tv/synthetic', 'https://python.org/about'])('master video switch remains authoritative without blocking ordinary webpages: %s', async url => {
+  const api = release()
+  const request = jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(reply({ ...capabilities, video_url: false, video_url_platforms: ['bilibili'] })).mockResolvedValueOnce(reply({ task_id: 'synthetic' }))
+  const work = api.integrationJson('/api/generate', { method: 'POST', body: JSON.stringify({ video_url: url }) }, 'alice')
+  if (url.includes('b23.tv')) {
+    await expect(work).rejects.toMatchObject({ code: 'VIDEO_URL_PLATFORM_UNAVAILABLE' })
+    expect(request).toHaveBeenCalledTimes(1)
+  } else {
+    await expect(work).resolves.toEqual({ task_id: 'synthetic' })
+    expect(request).toHaveBeenCalledTimes(2)
+  }
+})
+
+test.each([0, 2, '1', null, true])('invalid optional source preflight protocol %j blocks content dispatch', async video_source_preflight => {
+  const api = release()
+  const request = jest.spyOn(globalThis, 'fetch').mockResolvedValue(reply({ ...capabilities, video_source_preflight }))
+  await expect(api.integrationJson('/api/generate', { method: 'POST' }, 'alice')).rejects.toMatchObject({ code: 'CONTENT_SERVICE_PROTOCOL_UNSUPPORTED' })
+  expect(request).toHaveBeenCalledTimes(1)
+})
+
+test('optional source preflight protocol 1 is accepted and source errors retain safe detail', async () => {
+  const api = release()
+  const detail = 'B站来源受限（HTTP 412），请稍后核验。'
+  const request = jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(reply({ ...capabilities, video_source_preflight: 1 })).mockResolvedValueOnce(reply({ detail }, 502))
+  await expect(api.integrationJson('/api/content-service/video-source', { method: 'POST', body: JSON.stringify({ url: 'https://b23.tv/synthetic' }) }, 'alice', 60000)).rejects.toMatchObject({ status: 502, message: detail })
+  expect(request).toHaveBeenCalledTimes(2)
+  expect(new Headers(request.mock.calls[1][1]?.headers).has('X-VINote-Operation-Id')).toBe(false)
+})

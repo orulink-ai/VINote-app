@@ -102,3 +102,7 @@ SummaryCheckpoint v11仅以相同model/title/source复用完整draft/audit；v8-
 `src/config/generationService.js` 是构建和 RN 共享的纯配置校验器。仅普通 Metro dev=true 用 USB loopback；Android standalone 通过 debuggableVariants=[] 的既有 RN Gradle bundler devEnabled=false 使用公网 JSON，无新增 native 常量。Release 打包与直接 Gradle Release 均要求显式内容地址；不能回退 VILab。共址集成入口必须由无推理 capabilities GET 证明内容角色。
 
 导入页核验/重试仅 GET，生成前重新校验；所有 production 内容 JSON 请求均先预检，Feishu/MCP 不受内容启用状态阻断。caps 必须 protocol1、generation=true、sync=false、正整数 max_upload_bytes 与 boolean video_url。PDF/DOCX 取服务上限和20MiB较小值。video_url=false时明确视频站/媒体链接在提交前阻止，普通网页走服务端安全提取；这不是出站隔离的替代。未知提交仍只查询，换服务不会重放。参阅 docs/content-service.md；未部署、未真机核实时如实保留边界。
+
+2026-10-17 B站平台能力补充：可选video_url_platforms显式列表优先限定视频平台，当前App只实现bilibili（bilibili.com/b23.tv），其余明确视频站和媒体直链禁用；列表空禁全部，格式错误失败关闭。video_url是总开关，非true必须拒绝全部视频，即使列表含bilibili；旧device无列表时video_url=true保留兼容。页面文案、submitIntake与production integrationJson POST前共享同一判断；后端仍须实际平台下载与出站隔离，客户端不构成下载allowlist。只读预检/离线测试不证明B站生成部署或验收。
+
+2026-10-17 来源预检：可选caps video_source_preflight仅允许整数1；仅新URL+B站在持久operation前POST /api/content-service/video-source {url}（60s），失败真实提示、不标unknown、不POST generate。该POST只读来源、不映射身份/创建任务/模型调用；旧device缺字段、普通网页、文件上传和既有任务return/recover不增加该请求。

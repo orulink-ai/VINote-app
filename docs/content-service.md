@@ -20,16 +20,23 @@
   "generation": true,
   "sync": false,
   "max_upload_bytes": 134217728,
-  "video_url": false,
-  "video_url_reason": "DOWNLOAD_EGRESS_NOT_ENFORCED"
+  "video_url": true,
+  "video_url_platforms": ["bilibili"],
+  "video_source_preflight": 1
 }
 ```
 
-`max_upload_bytes` 必须正安全整数，`video_url` 必须 boolean；reason 可选，仅作服务端诊断，不直接显示给普通用户。页面显示检查中、内容服务已就绪或简洁错误及“重新检查服务”。重试仍只 GET。401 最多安全 refresh 一次；403、未部署/禁用、协议错误、网络失败不能变成就绪，不发 generation POST。
+`max_upload_bytes` 必须正安全整数，`video_url` 必须 boolean。可选 `video_url_platforms` 为最多16个无重复的小写平台名：存在时严格限制已声明平台，当前App只识别开放 bilibili（含b23.tv），其余视频/媒体链接不放行；空列表禁用全部视频。video_url 是总开关，非 true 时必须拒绝全部视频；仅 true 时平台列表才进一步缩小范围。没有该字段时兼容旧device video_url=true/false行为；null/字符串/对象/重复/非法平台名均失败关闭。reason 可选，仅作服务端诊断，不直接显示给普通用户。页面显示检查中、内容服务已就绪或简洁错误及“重新检查服务”。重试仍只 GET。401 最多安全 refresh 一次；403、未部署/禁用、协议错误、网络失败不能变成就绪，不发 generation POST。
 
-新来源提交前再次 GET，文件大小按实际 FS.stat 核验，超限在 FormData/未知提交标记前失败。服务上限和 PDF/DOCX 的20MiB取较小值。界面使用 MB 简写，实际按字节边界判断。客户端检测明确视频站/媒体直链用于提前提示；服务端仍须强制视频下载禁用/出站隔离，不能依赖客户端识别。普通网页使用后端安全提取，不把任意 URL 交给 yt-dlp。
+新来源提交前再次 GET，文件大小按实际 FS.stat 核验，超限在 FormData/未知提交标记前失败。服务上限和 PDF/DOCX 的20MiB取较小值。界面使用 MB 简写，实际按字节边界判断。当显式平台列表仅含bilibili时，页面恢复B站/b23.tv链接提示，其他视频提示导入文件。新来源提交和production API POST前再次核对当次capabilities；只读预检不推理。客户端检测明确视频站/媒体直链用于提前提示；服务端仍须强制视频下载禁用/出站隔离，不能依赖客户端识别。普通网页使用后端安全提取，不把任意 URL 交给 yt-dlp。
 
 所有 production 内容 JSON 请求在原身份 lease/超时内先读 capabilities；飞书/MCP/插件不会因内容 runtime 禁用而被误阻断。预检成功仅说明 API 角色启用，不证明模型、源站、上传或生成成功。
+
+## B站来源只读预检
+
+可选能力 `video_source_preflight` 仅接受整数1；字段不存在兼容旧device，不增加来源请求。仅新的URL且已通过视频总开关/平台范围验证、目标为B站/b23.tv时，在operation持久化前调用 `POST /api/content-service/video-source`，JSON `{ "url": "https://b23.tv/synthetic" }`，超时60秒。返回title/video_id/duration/url；失败422/502保留安全detail（包括实际412来源受限信息），不写pending/operation，不POST generate。此POST仅按HTTP形式发送读取请求，无身份映射、任务或模型；客户端不带operation头。
+
+原任务return/recover顺序不变，不调用来源预检；普通网页、文件上传跳过此步。预检成功仅表示当次来源检查通过，不承诺后续网络、上传或推理成功；412不等于视频本身失效。
 
 ## 客户端所需路由和鉴权
 
@@ -38,7 +45,8 @@
 | 路由 | 客户端合同 |
 | --- | --- |
 | GET `/api/content-service/capabilities` | 上述无推理合同；缺字段失败关闭 |
-| POST `/api/generate` | 明确用户操作；JSON `video_url`、platform=auto、workflow=note_organization、style=detailed、summary_mode=default、output_language=zh-CN。字段名 video_url 为兼容接口，普通网页也走此字段；video_url=false 时不可用它启动视频下载 |
+| POST `/api/content-service/video-source` | 仅新B站来源的只读检查；Bearer，body={url}，60s；无身份映射/任务/模型，失败422/502返回安全detail；不发送operation头 |
+| POST `/api/generate` | 明确用户操作；JSON `video_url`、platform=auto、workflow=note_organization、style=detailed、summary_mode=default、output_language=zh-CN。字段名 video_url 为兼容接口，普通网页也走此字段；未获平台能力允许时不可用它启动视频下载 |
 | POST `/api/generate_from_upload` | multipart file/source_type/title及上述总结选项；按 runtime max_upload_bytes，PDF/DOCX还限20MiB；不接受服务端本地路径 |
 | GET `/api/source-requests/{operation_id}` | 原 owner 精确操作回执，须返回相同 operation_id、有效 task_id、reserved/accepted及来源类型；reserved/未知只查询，不重发，不改绑最新任务 |
 | GET `/api/task/{task_id}` | 精确 owner 状态、message、progress/retryable及成功 result.title/markdown；源记录本机保存，generation Origin 改变不能查询新地址代替原地址 |
@@ -55,4 +63,4 @@
 
 主线程负责启用 runtime、路由 allowlist、Bearer-only、私网/本地路径/文件库与 workspace 禁止、出站提取与上传限制。App 仓库本轮不修改后端、不部署、不实际请求云端、不执行ASR/LLM。
 
-计划无推理手机验收：打开笔记导入页检查 public capabilities 就绪；失败时只点重新检查；查看已有笔记、编辑保存、重开。不得点生成、旧任务生成重试或录音处理。公开视频链接未启用，普通网页/PDF/Word/媒体上传的完整生成均未由本轮验收。iOS 原生/真机未验证。离线测试与 GitHub CI 不能替代这些事实。
+计划无推理手机验收：打开笔记导入页检查 public capabilities 就绪；失败时只点重新检查；查看已有笔记、编辑保存、重开。不得点生成、旧任务生成重试或录音处理。本轮仅实现B站平台声明的客户端支持，后端开放/下载出站隔离和B站完整生成仍待主线程核实；普通网页/PDF/Word/媒体上传的完整生成均未由本轮验收。iOS 原生/真机未验证。离线测试与 GitHub CI 不能替代这些事实。

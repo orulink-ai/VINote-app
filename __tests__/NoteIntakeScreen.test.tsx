@@ -174,3 +174,35 @@ test.each([
   expect(integrationJson).not.toHaveBeenCalled()
   await act(async () => view.unmount())
 })
+
+test.each([['https://b23.tv/synthetic', false], ['https://youtu.be/synthetic', true]])('Bilibili-only readiness restores a scoped link entry without auto generation: %s', async (url, blocked) => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockResolvedValueOnce({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true, video_url_platforms: ['bilibili'] })
+  jest.mocked(readIntake).mockResolvedValue({ mode: 'url', url })
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+  const text = view.root.findAllByType(Text).map(node => node.props.children).flat().join(' ')
+  expect(text).toContain('网页、B站或文档链接')
+  expect(text).toContain('b23.tv')
+  expect(text).toContain('其他视频或音频请导入文件')
+  if (blocked) expect(text).toContain('目前仅支持 B 站')
+  expect(view.root.findAll(node => node.props.title === '生成总结笔记')[0].props.disabled).toBe(blocked)
+  expect(submitIntake).not.toHaveBeenCalled()
+  expect(integrationJson).not.toHaveBeenCalled()
+  await act(async () => view.unmount())
+})
+
+test('master video switch false hides Bilibili entry and blocks generation despite platform list', async () => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockResolvedValueOnce({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: false, video_url_platforms: ['bilibili'] })
+  jest.mocked(readIntake).mockResolvedValue({ mode: 'url', url: 'https://b23.tv/synthetic' })
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+  const text = view.root.findAllByType(Text).map(node => node.props.children).flat().join(' ')
+  expect(text).not.toContain('网页、B站或文档链接')
+  expect(text).toContain('暂不支持视频或音频链接')
+  expect(view.root.findAll(node => node.props.title === '生成总结笔记')[0].props.disabled).toBe(true)
+  expect(submitIntake).not.toHaveBeenCalled()
+  expect(integrationJson).not.toHaveBeenCalled()
+  await act(async () => view.unmount())
+})

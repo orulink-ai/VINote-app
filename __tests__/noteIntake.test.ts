@@ -158,3 +158,71 @@ test.each(['https://b23.tv/synthetic', 'https://www.bilibili.com/video/synthetic
   expect(api).not.toHaveBeenCalled()
   expect((await readIntake('owner')).operationId).toBeUndefined()
 })
+
+test.each([
+  ['https://b23.tv/synthetic', true],
+  ['https://youtu.be/synthetic', false],
+  ['https://media.example/synthetic.mp4', false],
+])('intake respects Bilibili-only scope before persisting new requests: %s', async (url, allowed) => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockResolvedValueOnce({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true, video_url_platforms: ['bilibili'] })
+  if (allowed) {
+    api.mockResolvedValueOnce({ task_id: taskId, operation_id: operation, state: 'accepted' })
+    await expect(submitIntake('owner', { mode: 'url', url })).resolves.toMatchObject({ taskId })
+    expect(api).toHaveBeenCalledWith('/api/generate', expect.anything(), 'owner', 180000)
+  } else {
+    await expect(submitIntake('owner', { mode: 'url', url })).rejects.toThrow('仅支持 B 站')
+    expect(api).not.toHaveBeenCalled()
+    expect((await readIntake('owner')).operationId).toBeUndefined()
+  }
+})
+
+test('master video switch false blocks Bilibili at source submission before any unknown marker or POST', async () => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockResolvedValueOnce({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: false, video_url_platforms: ['bilibili'] })
+  await expect(submitIntake('owner', { mode: 'url', url: 'https://b23.tv/synthetic' })).rejects.toThrow('暂不支持')
+  expect(api).not.toHaveBeenCalled()
+  expect((await readIntake('owner')).operationId).toBeUndefined()
+})
+
+test.each([422, 502])('Bilibili source preflight rejection %s preserves real error without pending operation or generation POST', async status => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockResolvedValueOnce({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true, video_url_platforms: ['bilibili'], video_source_preflight: 1 })
+  const error = new ApiError('B站来源受限（HTTP 412），请稍后核验。', status)
+  api.mockRejectedValueOnce(error)
+  await expect(submitIntake('owner', { mode: 'url', url: 'https://b23.tv/synthetic' })).rejects.toBe(error)
+  expect(api).toHaveBeenCalledTimes(1)
+  expect(api).toHaveBeenCalledWith('/api/content-service/video-source', { method: 'POST', body: JSON.stringify({ url: 'https://b23.tv/synthetic' }) }, 'owner', 60000)
+  expect((await readIntake('owner')).operationId).toBeUndefined()
+  expect((await readIntake('owner')).uncertain).toBeUndefined()
+  expect((await Storage.getAllKeys()).some(key => key.includes(':source-request:'))).toBe(false)
+})
+
+test('source preflight success precedes pending persistence and the single generation submission', async () => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockResolvedValueOnce({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true, video_url_platforms: ['bilibili'], video_source_preflight: 1 })
+  api.mockImplementationOnce(async () => {
+    expect((await readIntake('owner')).operationId).toBeUndefined()
+    return { title: '示例', video_id: 'synthetic', duration: 73, url: 'https://b23.tv/synthetic' }
+  }).mockResolvedValueOnce({ task_id: taskId, operation_id: operation, state: 'accepted' })
+  await expect(submitIntake('owner', { mode: 'url', url: 'https://b23.tv/synthetic' })).resolves.toMatchObject({ taskId })
+  expect(api.mock.calls.map(call => call[0])).toEqual(['/api/content-service/video-source', '/api/generate'])
+})
+
+test.each([['https://b23.tv/synthetic', false], ['https://python.org/about', true]])('legacy device or ordinary webpage does not invoke video-source preflight: %s', async (url, enabled) => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  verifyContentService.mockResolvedValueOnce({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true, ...(enabled ? { video_source_preflight: 1 } : {}) })
+  api.mockResolvedValueOnce({ task_id: taskId, operation_id: operation, state: 'accepted' })
+  await submitIntake('owner', { mode: 'url', url })
+  expect(api.mock.calls.map(call => call[0])).toEqual(['/api/generate'])
+})
+
+test.each([false, true])('existing accepted/recoverable task skips all new-source preflight: recovery=%s', async recovery => {
+  const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
+  const original = { mode: 'url', url: 'https://b23.tv/synthetic', ...(recovery ? { operationId: operation, uncertain: true } : { taskId, receiptState: 'accepted' }) }
+  await Storage.setItem('vinote:owner:note-intake', JSON.stringify(original))
+  if (recovery) api.mockResolvedValueOnce({ task_id: taskId, operation_id: operation, state: 'accepted', status: 'processing' })
+  await submitIntake('owner', original as never)
+  expect(verifyContentService).not.toHaveBeenCalled()
+  expect(api.mock.calls.map(call => call[0])).toEqual(recovery ? [`/api/source-requests/${operation}`] : [])
+})

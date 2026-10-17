@@ -57,3 +57,8 @@ GitHub 只读查询 PR10 statusCheckRollup=[]；仓库 Actions workflows total_c
 - 首次GitHub run 38996608865：配置、脚本、TypeScript通过；Jest为122suite/1109test通过、1项失败。既有recordingTitle.test.ts把输入+08时区的10月12日写死，而产品按设备当地时间格式化，UTC runner正确得到10月11日22:58。
 - Red：本机显式TZ=UTC定向18项中复现同一1项失败。Green：断言改用输入时间在当前时区的Intl日历日期；分别TZ=UTC和Asia/Shanghai定向18/18通过，网络守卫开启。保留原日期来源、主题和未知时间断言，不固定CI时区掩盖问题。
 - 本次仅测试与本档案追加中文commit并push，第二次GitHub实际结果在交接报告登记，不重跑无新变化的产品测试或扩大功能。
+
+
+## 后续变更：B站平台能力
+
+[平台能力与入口](../2026-10-17_112823_wugui_无Issue_B站链接平台能力/index.md) 扩展capabilities的可选video_url_platforms，对显式B站范围恢复入口，其他视频保持限制。旧device缺该字段时布尔合同仍适用，不修改本档案已有CI/手机/部署证据。本次按用户要求不commit。
