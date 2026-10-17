@@ -16,7 +16,8 @@ class Socket {
   onmessage?: (event: { data: string }) => void
   onclose?: () => void
   onerror?: () => void
-  constructor() { Socket.current = this }
+  url: string
+  constructor(url = '') { Socket.current = this; this.url = url }
   send(value: unknown) { this.sent.push(value) }
   close() { this.onclose?.() }
   event(value: object) { this.onmessage?.({ data: JSON.stringify(value) }) }
@@ -522,4 +523,24 @@ test('socket structured empty error remains typed and drops provider text/sessio
   expect(error.code).toBe('empty_result_unverified')
   expect(error.diagnostic).toEqual({ category: 2, stage: 2, audioAttempted: 1, sentComplete: 1 })
   expect(JSON.stringify(error)).not.toContain('SYNTHETIC_SECRET_BODY')
+})
+
+
+test('equal ASR model IDs use only the configured LAN or public socket origin', async () => {
+  const env = require('../src/config/env') as { API_BASE_URL: string }
+  const original = env.API_BASE_URL
+  try {
+    for (const origin of ['http://192.168.1.143:9876', 'https://api.orulink.ai']) {
+      env.API_BASE_URL = origin
+      const result = recognizeInterval('file:///synthetic.wav', 'same-asr-id', 0, .1, 'owner', async () => {}, jest.fn())
+      await flush()
+      const socket = Socket.current
+      expect(socket.url).toBe(origin.replace(/^http/, 'ws') + '/v1/asr/transcriptions')
+      socket.onopen?.(); socket.event({ type: 'session.started' }); await flush()
+      await jest.advanceTimersByTimeAsync(200); await flush()
+      socket.event({ type: 'asr.final', text: '已确认正文' })
+      await expect(result).resolves.toBe('已确认正文')
+      expect(socket.sent.some(value => typeof value === 'string' && value.includes('same-asr-id'))).toBe(true)
+    }
+  } finally { env.API_BASE_URL = original }
 })

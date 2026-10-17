@@ -1,3 +1,5 @@
+> 后续模型来源修正：新 App 笔记由设备连接各自固定 VILab URL 推理，共享内容服务仅纯提取。下文旧 generation worker 推理说明仅适用于历史云任务；当前合同见 [笔记模型来源](app-note-model-origin.md)。版本保持0.1.4。
+
 # App development, packaging and deployment
 
 [简体中文](build-and-deployment.md) · [Features and limits](../README.en.md)

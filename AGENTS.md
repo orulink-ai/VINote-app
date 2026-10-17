@@ -117,3 +117,8 @@ MeetingFiles协议bilibiliDownloadProtocol=1新增专用解析/流式下载/取�
 ## 2026-10-17 App 0.1.4 发布配置
 
 用户指定 0.1.4，Android versionCode 9，iOS build 5。test 独立 APK 使用 LAN 模型直连、公网账号/内容/飞书；链接或上传笔记由公网内容后端执行，不保证使用 LAN 模型。所有独立 APK/AAB（包括直接 Gradle standalone）必须显式配置 generationBaseUrl 与 integrationBaseUrl，Release 另限 public 与发布签名；Metro 不受独立包完整配置门槛影响。
+
+
+## 2026-10-17 笔记固定模型来源（替代此前公网 worker 推理）
+
+新 intake 使用 clientNotePipeline，ASR与笔记chatCompletion只连接包内固定API_BASE_URL；共享generationBaseUrl仅提供协议1纯提取，账号/飞书可共享。禁止将LAN目录ID交给公网generation worker，也禁止客户端任意覆盖服务Origin。操作先持久owner/Origin/models/sourcehash/checkpoint，推理前写inFlight，未知不重放/不换Origin/不以新UUID绕过；保存失败复用结果，旧云task只读，不迁移。文件关联execution=client，禁止把设备task UUID送云GET。无说话人或会议summarize，无新增模型标题调用。详见docs/app-note-model-origin.md；本轮离线测试不等于包/模型验收。

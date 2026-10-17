@@ -262,14 +262,15 @@ test('Android primary reads Bilibili on device even with remote video disabled, 
   expect(integrationJson).not.toHaveBeenCalled()
   await act(async () => view.unmount()); alert.mockRestore()
 })
-test('device Bilibili primary waits for service readiness, with no download or generation on failure', async () => {
+test('device Bilibili download is independent from shared content readiness and still requires confirmation', async () => {
   jest.mocked(deviceBilibiliAvailable).mockReturnValue(true)
   jest.mocked(readIntake).mockResolvedValue({ mode: 'url', url: 'https://b23.tv/example' })
   const { verifyContentService } = require('../src/lib/integration') as { verifyContentService: jest.Mock }
   verifyContentService.mockRejectedValueOnce(new Error('offline'))
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {})
   let view!: Renderer.ReactTestRenderer
   await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
-  expect(view.root.findAll(node => node.props.title === '读取B站内容')[0].props.disabled).toBe(true)
+  expect(view.root.findAll(node => node.props.title === '读取B站内容')[0].props.disabled).toBe(false)
   await act(async () => { await press(view, '读取B站内容') })
   expect(downloadBilibiliAudio).not.toHaveBeenCalled(); expect(submitIntake).not.toHaveBeenCalled()
   await act(async () => view.unmount())

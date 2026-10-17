@@ -10,6 +10,7 @@ export type IntakeModelContext = {
 }
 export type IntakeModelBinding = { owner: string; epoch: number; taskId: string; operationId?: string; origin: string }
 export function bindIntakeModel(owner: string, draft: IntakeDraft): IntakeModelBinding {
+  if (draft.execution === 'client') throw new Error('设备笔记操作不能转为云任务恢复')
   if (!owner || !draft.taskId || !draft.generationOrigin || draft.generationOrigin !== generationBaseUrl || draft.uncertain || draft.receiptState === 'reserved') {
     throw new Error('原任务或处理服务尚未核验，请返回处理历史查询原任务。')
   }

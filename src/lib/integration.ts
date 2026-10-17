@@ -10,7 +10,7 @@ import { isExplicitVideoUrl, isVideoUrlAllowed, validVideoUrlPlatforms, videoUrl
 export const integrationBaseUrl = (deployment.integrationBaseUrl || '').replace(/\/+$/, '')
 export const generationBaseUrl = resolveGenerationBaseUrl(deployment, __DEV__)
 const capabilitiesPath = '/api/content-service/capabilities'
-export type ContentServiceCapabilities = { content_service_protocol: 1; generation: true; sync: false; max_upload_bytes: number; video_url: boolean; video_url_reason?: string; video_url_platforms?: string[]; video_source_preflight?: 1 }
+export type ContentServiceCapabilities = { content_service_protocol: 1; generation: true; sync: false; max_upload_bytes: number; video_url: boolean; video_url_reason?: string; video_url_platforms?: string[]; video_source_preflight?: 1; text_extraction_protocol?: 1 }
 const integrationPath = (path: string) => /^\/api\/(workspace(?:\/|$)|feishu(?:\/|$)|mcp-connections(?:\/|$)|plugins(?:\/|$))/.test(path)
 export function integrationOrigin(path: string) {
   return integrationPath(path) ? integrationBaseUrl : generationBaseUrl
