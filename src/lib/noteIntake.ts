@@ -23,12 +23,42 @@ export async function readIntake(owner: string): Promise<IntakeDraft> {
   await guard(owner)
   return JSON.parse(await Storage.getItem(key(owner)) || '{"mode":"url","url":""}')
 }
-export async function writeIntake(owner: string, draft: IntakeDraft) {
+async function writeSlot(owner: string, draft: IntakeDraft) {
   await guard(owner)
   if (draft.operationId) await Storage.setItem(`vinote:${owner}:source-request:${draft.operationId}`, JSON.stringify(draft))
   await guard(owner)
   await Storage.setItem(key(owner), JSON.stringify(draft))
   await guard(owner)
+}
+const slotMutations = new Map<string, Promise<unknown>>()
+async function mutateSlot<T>(owner: string, action: () => Promise<T>): Promise<T> {
+  const work = (slotMutations.get(owner) || Promise.resolve()).catch(() => {}).then(action)
+  slotMutations.set(owner, work)
+  try { return await work } finally { if (slotMutations.get(owner) === work) slotMutations.delete(owner) }
+}
+export async function writeIntake(owner: string, draft: IntakeDraft) {
+  return mutateSlot(owner, () => writeSlot(owner, draft))
+}
+function selectionKey(draft: IntakeDraft) {
+  const file = draft.file
+  return JSON.stringify({ operation: draft.operationId, task: draft.taskId, execution: draft.execution,
+    origin: draft.modelOrigin, extraction: draft.generationOrigin, mode: draft.mode, url: draft.url,
+    models: draft.modelSelection,
+    file: file ? { id: file.id, uri: file.uri, extension: file.extension, size: 'size' in file ? file.size : undefined,
+      source: 'bilibiliSource' in file ? file.bilibiliSource : undefined } : undefined })
+}
+export async function leaveClientIntake(owner: string, expected: IntakeDraft) {
+  return mutateSlot(owner, async () => {
+    const stored = await readIntake(owner)
+    if (expected.execution !== 'client' || !expected.operationId || selectionKey(stored) !== selectionKey(expected)) throw new Error('当前来源已变化，未清除新的输入')
+    const record = await readClientNote(owner, expected)
+    if (selectionKey(record.draft) !== selectionKey(expected)) throw new Error('原来源身份已变化，未清除当前输入')
+    if (!['unknown', 'failed', 'success'].includes(record.status)) throw new Error('原处理仍在进行，请先读取原状态')
+    // Archive only the exact selection. The independent client record, result,
+    // source associations and inference markers are never changed by this action.
+    await writeSlot(owner, stored)
+    await writeSlot(owner, { mode: 'url', url: '' })
+  })
 }
 export async function leaveReservedIntake(owner: string, expected: IntakeDraft) {
   const stored = await readIntake(owner)
@@ -127,8 +157,10 @@ export async function inspectIntake(owner: string, draft: IntakeDraft) {
     const note = await saveSourceNote(draft.taskId!, record.result.title, record.result.markdown, draft.sourceType || 'file', owner, draft.file?.createdAt || draft.submittedAt, draft.file && 'bilibiliSource' in draft.file ? draft.file.bilibiliSource : undefined)
     await guard(owner)
     if (draft.operationId) await advanceLocalFileAssociation(owner, draft.operationId, draft.taskId!, 'saved', note.id)
-    const current = await readIntake(owner)
-    if (current.operationId === draft.operationId) await writeIntake(owner, { mode: draft.mode, url: '' })
+    await mutateSlot(owner, async () => {
+      const current = await readIntake(owner)
+      if (selectionKey(current) === selectionKey(draft)) await writeSlot(owner, { mode: draft.mode, url: '' })
+    })
     return { status: { status: 'success', result: record.result } as IntakeStatus, note }
   }
   if (draft.receiptState === 'reserved' || draft.uncertain) throw new Error('提交已登记，尚未确认排队；请核验原提交，不重新派发')
@@ -142,7 +174,10 @@ export async function inspectIntake(owner: string, draft: IntakeDraft) {
     await guard(owner)
     if (draft.operationId) await advanceLocalFileAssociation(owner, draft.operationId, draft.taskId, 'saved', note.id)
     // Clear only after local saving succeeds; a failed save keeps the accepted receipt.
-    await writeIntake(owner, { mode: draft.mode, url: '' })
+    await mutateSlot(owner, async () => {
+      const current = await readIntake(owner)
+      if (selectionKey(current) === selectionKey(draft)) await writeSlot(owner, { mode: draft.mode, url: '' })
+    })
     return { status, note }
   }
   return { status: { ...status, retryable: false } }

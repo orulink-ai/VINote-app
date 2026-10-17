@@ -2,7 +2,7 @@ import Storage from '@react-native-async-storage/async-storage'
 import FS from 'react-native-fs'
 import { integrationJson, verifyContentService } from '../src/lib/integration'
 import { readAccountId } from '../src/lib/storage'
-import { inspectIntake, intakeUrl, leaveReservedIntake, readIntake, recoverIntake, submitIntake, writeIntake } from '../src/lib/noteIntake'
+import { inspectIntake, intakeUrl, leaveClientIntake, leaveReservedIntake, readIntake, recoverIntake, submitIntake, writeIntake } from '../src/lib/noteIntake'
 import { launchClientNote, readClientNote } from '../src/lib/clientNotePipeline'
 import { saveSourceNote } from '../src/lib/notes'
 import { loadModels, loadSelection } from '../src/lib/models'
@@ -13,7 +13,7 @@ import { ApiError } from '../src/lib/errors'
 
 jest.mock('../src/config/env', () => ({ API_BASE_URL: 'http://192.168.1.143:9876' }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
-jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://extract.example', verifyContentService: jest.fn(), integrationJson: jest.fn(), operationId: () => '11111111-1111-4111-8111-111111111111' }))
+jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://extract.example', verifyContentService: jest.fn(), integrationJson: jest.fn(), operationId: jest.fn(() => '11111111-1111-4111-8111-111111111111') }))
 jest.mock('../src/lib/notes', () => ({ saveSourceNote: jest.fn() }))
 jest.mock('../src/lib/models', () => ({ loadSelection: jest.fn(), loadModels: jest.fn() }))
 jest.mock('../src/lib/meetingCloud', () => ({ transcribe: jest.fn(async () => '完整转写') }))
@@ -169,4 +169,57 @@ test('receipt persistence failure can explicitly finish the same pre-dispatch op
     expect((await Storage.getAllKeys()).filter(key => key.includes(':client-note:'))).toHaveLength(1)
     expect(chatCompletion).toHaveBeenCalledTimes(1)
   } finally { jest.mocked(Storage.setItem).mockImplementation(original) }
+})
+
+test('unknown operation can be explicitly archived and another source processed without replaying the old request', async () => {
+  jest.mocked(chatCompletion).mockRejectedValueOnce(new Error('lost completion'))
+  const first = await submitIntake('owner', url)
+  await launchClientNote('owner', first)
+  expect((await readClientNote('owner', first)).status).toBe('unknown')
+  const key = `vinote:owner:client-note:${first.operationId}`
+  const frozen = await Storage.getItem(key)
+  const calls = jest.mocked(chatCompletion).mock.calls.length
+  await leaveClientIntake('owner', first)
+  expect(await Storage.getItem(key)).toBe(frozen)
+  expect(await Storage.getItem(`vinote:owner:source-request:${first.operationId}`)).not.toBeNull()
+  expect((await readIntake('owner')).operationId).toBeUndefined()
+  await expect(submitIntake('owner', url)).rejects.toThrow('此来源有未确认')
+  expect(chatCompletion).toHaveBeenCalledTimes(calls)
+  const control = require('../src/lib/integration') as { operationId: jest.Mock }
+  control.operationId.mockReturnValueOnce('22222222-2222-4222-8222-222222222222')
+  const next = await submitIntake('owner', { mode: 'url', url: 'https://different.example/source' })
+  await launchClientNote('owner', next)
+  expect(next.operationId).not.toBe(first.operationId)
+  expect(chatCompletion).toHaveBeenCalledTimes(calls + 1)
+  expect(await Storage.getItem(key)).toBe(frozen)
+  expect(api.mock.calls.some(call => call[0].includes('/task/'))).toBe(false)
+})
+test.each(['operation', 'task', 'modelOrigin', 'source', 'models'])('stale %s selection cannot clear the current slot', async changed => {
+  const first = await submitIntake('owner', url); await launchClientNote('owner', first)
+  const next = { ...first,
+    ...(changed === 'operation' ? { operationId: '22222222-2222-4222-8222-222222222222' } : {}),
+    ...(changed === 'task' ? { taskId: '22222222-2222-4222-8222-222222222222' } : {}),
+    ...(changed === 'modelOrigin' ? { modelOrigin: 'https://different.example' } : {}),
+    ...(changed === 'source' ? { url: 'https://different.example/source' } : {}),
+    ...(changed === 'models' ? { modelSelection: { asr_model: 'other', llm_model: 'other' } } : {}) }
+  await writeIntake('owner', next)
+  await expect(leaveClientIntake('owner', first)).rejects.toThrow('已变化')
+  expect(await readIntake('owner')).toEqual(next)
+})
+test('a late result and stale escape cannot clear a concurrently queued newer selection', async () => {
+  const first = await submitIntake('owner', url); await launchClientNote('owner', first)
+  const next = { mode: 'url' as const, url: 'https://different.example/new' }
+  await Promise.all([writeIntake('owner', next), inspectIntake('owner', first)])
+  await expect(leaveClientIntake('owner', first)).rejects.toThrow('已变化')
+  expect(await readIntake('owner')).toEqual(next)
+})
+
+test('changed owner cannot release another account input or inference marker', async () => {
+  const first = await submitIntake('owner', url); await launchClientNote('owner', first)
+  const key = `vinote:owner:client-note:${first.operationId}`
+  const record = await Storage.getItem(key), slot = await Storage.getItem('vinote:owner:note-intake')
+  jest.mocked(readAccountId).mockResolvedValue('other')
+  await expect(leaveClientIntake('owner', first)).rejects.toThrow('账号')
+  expect(await Storage.getItem(key)).toBe(record)
+  expect(await Storage.getItem('vinote:owner:note-intake')).toBe(slot)
 })

@@ -4,7 +4,7 @@ import Renderer, { act } from 'react-test-renderer'
 import { Alert, Platform } from 'react-native'
 import { deviceBilibiliAvailable, downloadBilibiliAudio } from '../src/lib/bilibiliDownload'
 import { NoteIntakeScreen } from '../src/screens/NoteIntakeScreen'
-import { inspectIntake, leaveReservedIntake, readIntake, recoverIntake, submitIntake, writeIntake } from '../src/lib/noteIntake'
+import { inspectIntake, leaveClientIntake, leaveReservedIntake, readIntake, recoverIntake, submitIntake, writeIntake } from '../src/lib/noteIntake'
 import { verifyLocalFile, type LocalFile } from '../src/lib/localFiles'
 import { integrationJson } from '../src/lib/integration'
 import { readAccountId } from '../src/lib/storage'
@@ -13,7 +13,7 @@ jest.mock('../src/lib/bilibiliDownload', () => ({ deviceBilibiliAvailable: jest.
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
 jest.mock('../src/lib/localFiles', () => ({ importLocalFile: jest.fn(), verifyLocalFile: jest.fn(async () => {}) }))
 jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://source.invalid', verifyContentService: jest.fn(async () => ({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true })), integrationJson: jest.fn() }))
-jest.mock('../src/lib/noteIntake', () => ({ assertIntakeOrigin: jest.fn(), readIntake: jest.fn(), recoverIntake: jest.fn(), submitIntake: jest.fn(), inspectIntake: jest.fn(), leaveReservedIntake: jest.fn(async () => {}), writeIntake: jest.fn(async () => {}), intakeFileName: jest.fn(), intakeSourceType: jest.fn(), intakeUrl: jest.fn((url: string) => url) }))
+jest.mock('../src/lib/noteIntake', () => ({ assertIntakeOrigin: jest.fn(), readIntake: jest.fn(), recoverIntake: jest.fn(), submitIntake: jest.fn(), inspectIntake: jest.fn(), leaveClientIntake: jest.fn(async () => {}), leaveReservedIntake: jest.fn(async () => {}), writeIntake: jest.fn(async () => {}), intakeFileName: jest.fn(), intakeSourceType: jest.fn(), intakeUrl: jest.fn((url: string) => url) }))
 const pending = { mode: 'url' as const, url: 'https://python.org/about', operationId: 'original', receiptState: 'unknown' as const, uncertain: true }
 const accepted = { ...pending, generationOrigin: 'https://source.invalid', taskId: 'original-task', receiptState: 'accepted' as const, uncertain: false }
 test('a changed history target preserves the newer source without querying or dispatching it', async () => {
@@ -297,4 +297,22 @@ test('an existing accepted task never offers device download as an automatic fal
   expect(view.root.findAll(node => node.props.title === '读取B站内容')).toHaveLength(0)
   expect(downloadBilibiliAudio).not.toHaveBeenCalled(); expect(submitIntake).not.toHaveBeenCalled()
   await act(async () => view.unmount())
+})
+
+test('client unknown exposes an explicit guarded escape without query or inference replay', async () => {
+  const current = { ...accepted, execution: 'client' as const, modelOrigin: 'http://192.168.1.143:9876' }
+  jest.mocked(readIntake).mockResolvedValue(current)
+  jest.mocked(inspectIntake).mockResolvedValue({ status: { status: 'unknown', message: '结果未确认', retryable: false } })
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {})
+  let view!: Renderer.ReactTestRenderer
+  try {
+    await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+    const reads = jest.mocked(inspectIntake).mock.calls.length
+    await act(async () => { await press(view, '保留记录，整理其他资料') })
+    const buttons = alert.mock.calls.at(-1)?.[2]
+    await act(async () => { buttons?.find(button => button.text === '整理其他资料')?.onPress?.() })
+    expect(leaveClientIntake).toHaveBeenCalledWith('owner', current)
+    expect(submitIntake).not.toHaveBeenCalled()
+    expect(inspectIntake).toHaveBeenCalledTimes(reads)
+  } finally { await act(async () => view.unmount()); alert.mockRestore() }
 })

@@ -34,3 +34,11 @@
 ## 提交后安全复核
 
 发现同字节媒体复制到新路径后，完整指纹比较会把它视作新来源。补充以文件 SHA-256+size 识别未知请求别名，不能通过改路径和新 UUID 重发；仅对已有未知请求阻断，不迁移旧任务或替换正常待执行原件。追加离线反例（新路径、新UUID、相同字节），mock模型调用计数仍为1。定向累计183项，版本/协议未扩大。首个提交a4bd8ba的远端CI仍并行中，最终以PR最新HEAD检查为准。
+
+
+## Review：未知结果的显式退出
+
+- 原界面已有terminal“更换来源”，并非完全没有出口，但旧实现清slot没有expected selection复核，可能清掉新的输入。新增leaveClientIntake和明确“保留记录，整理其他资料”确认，owner级串行写，精确比较operation/task/modelOrigin/models/来源及冻结记录；只清当前槽，source-request归档、设备完整记录和未知marker逐字保留。
+- 保存完成清槽也改为同一串行expected-selection条件，晚到旧结果不清新来源。正常query/返回/前后台不退出或重派发；不同资料可显式新建，同字节未知拦截保留。
+- 新增真实mock LLM断线→unknown→显式退出→不同来源新操作（旧调用不增加）、同源仍阻断、5类stale selection、并发写/保存、账号切换、UI显式确认反例。非手写request掩盖链路。
+- 定向最终12 suites / 192 tests通过，Node384单worker禁网；tsc通过。此前c81提交的全量CI结果不代替本次最新HEAD检查。

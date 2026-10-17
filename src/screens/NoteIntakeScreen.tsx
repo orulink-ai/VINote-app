@@ -1,3 +1,4 @@
+import { leaveClientIntake } from '../lib/noteIntake'
 import { retryClientNote } from '../lib/clientNotePipeline'
 import { DetailDisclosure } from '../components/DetailDisclosure'
 import { BottomActionSheet } from '../components/BottomActionSheet'
@@ -301,7 +302,29 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
     } finally { locked.current = false; if (mounted.current) setBusy(false) }
     if (confirmationNeeded && mounted.current) await openModels()
   }
-  const changeSource = () => Alert.alert('保留原任务，整理另一份内容？', '原任务不会被取消，已保存笔记和原文件也不会删除。', [{ text: '取消', style: 'cancel' }, { text: '更换来源', onPress: () => void writeIntake(owner.current, empty).then(() => { if (timer.current) clearTimeout(timer.current); accept(empty); setTerminal(false); setError(''); setMessage('') }).catch(cause => setError(cause.message)) }])
+  const changeSource = () => {
+    const expected = current.current, account = owner.current
+    Alert.alert('保留记录，整理其他资料？', '原来源、处理记录和未确认请求均保留。不会取消、查询或重新发送原模型请求。', [
+      { text: '取消', style: 'cancel' }, { text: '整理其他资料', onPress: () => {
+        if (locked.current || !mounted.current || owner.current !== account) return
+        locked.current = true; setBusy(true)
+        void (async () => {
+          try {
+            if (expected.execution === 'client') await leaveClientIntake(account, expected)
+            else {
+              const stored = await readIntake(account)
+              if (stored.operationId !== expected.operationId || stored.taskId !== expected.taskId || stored.generationOrigin !== expected.generationOrigin) throw new Error('当前来源已变化，未清除新的输入')
+              await writeIntake(account, empty)
+            }
+            if (!mounted.current) return
+            if (timer.current) clearTimeout(timer.current)
+            accept(empty); saved.current = false; setTerminal(false); setRetryable(false); setError(''); setMessage('原处理记录已保留，请选择其他资料。')
+          } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : '来源已变化，未清除当前输入') }
+          finally { locked.current = false; if (mounted.current) setBusy(false) }
+        })()
+      } },
+    ])
+  }
   const leaveReserved = () => {
     if (locked.current || current.current.receiptState !== 'reserved') return
     const original = current.current, account = owner.current
@@ -369,7 +392,7 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
       {!ready && !!error && <PrimaryButton secondary title="重新读取来源" onPress={() => setPrepareAttempt(value => value + 1)} />}
       {draft.receiptState === 'reserved' && <PrimaryButton secondary title="整理另一份内容" disabled={busy} onPress={leaveReserved} />}
       {!draft.taskId && !busy && message && !error && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>{sourceRecoveryCopy(message)}</Text>}
-      {!awaitingLibraryChoice && (draft.taskId ? <View style={{ gap: 10 }}><PrimaryButton title={draft.receiptState === 'reserved' ? '核验原提交' : '重新查询结果'} disabled={busy} onPress={() => void query.current()} />{retryable && <PrimaryButton secondary title={draft.modelConfirmationRequired ? "确认模型并恢复原任务" : "重试处理原任务"} disabled={busy} onPress={() => void retry()} />}{terminal && <PrimaryButton tertiary title="更换来源" disabled={busy} onPress={changeSource} />}</View>
+      {!awaitingLibraryChoice && (draft.taskId ? <View style={{ gap: 10 }}><PrimaryButton title={draft.receiptState === 'reserved' ? '核验原提交' : '重新查询结果'} disabled={busy} onPress={() => void query.current()} />{retryable && <PrimaryButton secondary title={draft.modelConfirmationRequired ? "确认模型并恢复原任务" : "重试处理原任务"} disabled={busy} onPress={() => void retry()} />}{terminal && <PrimaryButton tertiary title={draft.execution === 'client' ? "保留记录，整理其他资料" : "更换来源"} disabled={busy} onPress={changeSource} />}</View>
         : <PrimaryButton title={draft.uncertain || draft.operationId ? '核验原提交' : deviceBilibiliPath ? '读取B站内容' : '生成总结笔记'} loading={busy} disabled={!ready || (!draft.operationId && !draft.uncertain && (serviceState !== 'ready' || !!fileTooLarge || iosBilibiliBlocked || (videoLinkBlocked && !deviceBilibiliPath) || (draft.mode === 'url' ? !draft.url.trim() : !draft.file)))} onPress={start} />)}
       {!awaitingLibraryChoice && draft.taskId && <DetailDisclosure key={`source-${draft.generationOrigin}-${draft.operationId}-${draft.taskId}`} title="来源与保存位置">
           <Text style={styles.subtitle}>{draft.mode === 'url' ? draft.url || '已提交的链接' : draft.file ? intakeFileName(draft.file) : '已提交的文件'}</Text>
