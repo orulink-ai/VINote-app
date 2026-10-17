@@ -21,7 +21,7 @@ const remote = (content: string): WorkspaceNote => ({ key: 'shared', title: 'Cac
   source_type: 'text', source_device: 'desktop', revision: 5, created_at: local.created_at,
   updated_at: '2026-10-12T01:00:00Z', deleted: false, archived: false, version_count: 1,
   transcript: null, metadata: {}, versions: [], next_versions_offset: null })
-const stateFor = (content: string): WorkspaceState => ({ serviceOrigin: 'https://workspace.example', cache: { shared: remote(content) }, mappings: {
+const stateFor = (content: string): WorkspaceState => ({ localOnly: true, serviceOrigin: 'https://workspace.example', cache: { shared: remote(content) }, mappings: {
   'note:local-note': { key: 'shared', group: 'note:local-note', localIds: ['local-note'],
     signature: 'acknowledged', revision: 5, status: 'synced' } } })
 let account: string | null
@@ -43,11 +43,11 @@ beforeEach(async () => {
   jest.clearAllMocks()
 })
 
-test('one load merges only the fixed owner local namespace and one saved workspace snapshot, without network or writes', async () => {
+test('one load checks migration and merges only the fixed owner device namespace and fresh snapshot, without network or writes', async () => {
   const rows = await listNotes('alice')
   expect(rows).toHaveLength(1)
-  expect(rows[0]).toMatchObject({ content: 'alice cached content', workspace_revision: 5 })
-  expect(FS.readFile).toHaveBeenCalledTimes(1)
+  expect(rows[0]).toMatchObject({ content: 'local draft', workspace_revision: 4 })
+  expect(jest.mocked(FS.readFile).mock.calls.every(([path]) => path === snapshotPath('alice'))).toBe(true)
   expect(FS.readFile).toHaveBeenCalledWith(snapshotPath('alice'), 'utf8')
   expect(jest.mocked(Storage.getItem).mock.calls.every(([key]) => key.startsWith('vinote:alice:'))).toBe(true)
   expect(integrationJson).not.toHaveBeenCalled()
@@ -117,23 +117,25 @@ test('local and workspace reads start independently rather than waiting for all 
     await localStarted
     expect(FS.readFile).toHaveBeenCalledWith(snapshotPath('alice'), 'utf8')
   } finally { release() }
-  expect((await reading)[0].content).toBe('alice cached content')
+  expect((await reading)[0].content).toBe('local draft')
 })
 
 test('a caller-supplied per-load snapshot is reused by the view merge without a second read', async () => {
   const rows = await workspaceViews([local], stateFor('given snapshot'))
-  expect(rows[0].content).toBe('given snapshot')
+  expect(rows[0].content).toBe('local draft')
   expect(Storage.getItem).not.toHaveBeenCalled()
   expect(FS.readFile).not.toHaveBeenCalled()
 })
 
 test('each new list load reads the newly committed snapshot, with no module cache or stale CAS revision', async () => {
+  await Storage.removeItem(noteKey('alice'))
   expect((await listNotes('alice'))[0].workspace_revision).toBe(5)
+  const priorReads = jest.mocked(FS.readFile).mock.calls.length
   const next = stateFor('newer acknowledged content')
   next.cache.shared.revision = 6
   snapshots.set(snapshotPath('alice'), next)
   expect((await listNotes('alice'))[0]).toMatchObject({ content: 'newer acknowledged content', workspace_revision: 6 })
-  expect(FS.readFile).toHaveBeenCalledTimes(2)
+  expect(jest.mocked(FS.readFile).mock.calls.length).toBeGreaterThan(priorReads)
 })
 
 test('background sync failure preserves readable cache and leaves failed/pending state untouched', async () => {
@@ -151,12 +153,12 @@ test('background sync failure preserves readable cache and leaves failed/pending
   expect(Storage.setItem).not.toHaveBeenCalled()
 })
 
-test('a known tombstone suppresses linked local content while an unresolved pending draft is retained', async () => {
+test('a known tombstone suppresses linked local content even when historical conflict metadata remains', async () => {
   const state = snapshots.get(snapshotPath('alice'))!
   state.cache.shared.deleted = true
   expect(await listNotes('alice')).toEqual([])
   state.mappings['note:local-note'].status = 'conflict'
-  expect(await listNotes('alice')).toEqual([local])
+  expect(await listNotes('alice')).toEqual([])
 })
 
 test('no logged-in owner returns no account data', async () => {

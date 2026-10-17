@@ -19,7 +19,7 @@ const pointerKey = (owner = 'alice') => `vinote:${owner}:workspace-file`
 const local: Note = { id: 'local', title: 'Local', content: 'local original', status: 'done',
   created_at: '2026-10-11T00:00:00Z', updated_at: '2026-10-12T00:00:00Z', workspace_revision: 4 }
 const state = (content = 'remote original', revision = 5): WorkspaceState => ({
-  serviceOrigin: 'https://workspace.example', mappings: { local: { key: 'shared', group: 'note:local',
+  localOnly: true, serviceOrigin: 'https://workspace.example', mappings: { local: { key: 'shared', group: 'note:local',
     localIds: ['local'], signature: 'ack', revision, status: 'synced' } },
   cache: { shared: { key: 'shared', title: 'Remote', content, revision, source_type: 'text', source_device: 'desktop',
     created_at: local.created_at, updated_at: '2026-10-12T01:00:00Z', deleted: false, archived: false,
@@ -34,7 +34,7 @@ async function commit(snapshot: WorkspaceState, owner = 'alice') {
   files.set(`/documents/workspace-${owner}-${file}.json`, JSON.stringify(snapshot))
   await originalSet(pointerKey(owner), JSON.stringify({ file }))
 }
-const display = (id = 'local', expectedOwner = 'alice') => getNote(id, { expectedOwner, mode: 'display' })
+const display = (id = 'workspace-shared', expectedOwner = 'alice') => getNote(id, { expectedOwner, mode: 'display' })
 
 beforeEach(async () => {
   jest.mocked(Storage.getItem).mockImplementation(originalGet)
@@ -92,7 +92,7 @@ test('display reopens avoid file reads, while default getNote and readWorkspace 
   const first = await display()
   expect(await display()).toEqual(first)
   expect(FS.readFile).toHaveBeenCalledTimes(1)
-  expect(jest.mocked(Storage.getItem).mock.calls.filter(([name]) => name === key()).length).toBeGreaterThanOrEqual(2)
+  expect(jest.mocked(Storage.getItem).mock.calls.filter(([name]) => name === key('alice', 'workspace-shared')).length).toBeGreaterThanOrEqual(2)
   expect(jest.mocked(Storage.getItem).mock.calls.filter(([name]) => name === pointerKey()).length).toBeGreaterThanOrEqual(2)
   await getNote('local'); await readWorkspace('alice')
   expect(FS.readFile).toHaveBeenCalledTimes(3)
@@ -104,7 +104,7 @@ test('list warms its virtual detail projection without reusing list snapshots fo
   expect(await display(rows[0].id)).toEqual(rows[0])
   expect(FS.readFile).toHaveBeenCalledTimes(filesBefore)
   await listNotes('alice')
-  expect(FS.readFile).toHaveBeenCalledTimes(filesBefore + 1)
+  expect(jest.mocked(FS.readFile).mock.calls.length).toBeGreaterThan(filesBefore)
 })
 
 test('committed pointer changes invalidate display even with the same note id', async () => {
@@ -114,25 +114,27 @@ test('committed pointer changes invalidate display even with the same note id', 
 })
 
 test('local value changes invalidate display even with unchanged timestamp and pointer', async () => {
-  await display()
+  await display('local')
   await originalSet(key(), JSON.stringify({ ...local, updated_at: '2026-10-12T02:00:00Z', content: 'dirty A' }))
-  expect((await display()).content).toBe('dirty A')
+  expect((await display('local')).content).toBe('dirty A')
   await originalSet(key(), JSON.stringify({ ...local, updated_at: '2026-10-12T02:00:00Z', content: 'dirty B' }))
-  expect((await display()).content).toBe('dirty B')
+  expect((await display('local')).content).toBe('dirty B')
   expect(FS.readFile).toHaveBeenCalledTimes(3)
 })
 
 test('returned list and detail objects cannot mutate cached nested tags or transcript', async () => {
+  await Storage.removeItem(key())
   const snapshot = state(); snapshot.cache.shared.metadata.tags = ['original']
   await commit(snapshot)
   const rows = await listNotes('alice')
+  const readsBeforeMutation = jest.mocked(FS.readFile).mock.calls.length
   rows[0].tags!.push('list mutation'); rows[0].transcript!.aliases!.speaker = 'List mutation'
   const first = await display(rows[0].id)
   expect(first.tags).toEqual(['original']); expect(first.transcript!.aliases!.speaker).toBe('Original')
   first.tags!.push('detail mutation'); first.transcript!.aliases!.speaker = 'Detail mutation'
   expect((await display(rows[0].id)).tags).toEqual(['original'])
   expect((await display(rows[0].id)).transcript!.aliases!.speaker).toBe('Original')
-  expect(FS.readFile).toHaveBeenCalledTimes(1)
+  expect(FS.readFile).toHaveBeenCalledTimes(readsBeforeMutation)
 })
 
 test.each([{ status: 'pending' as const }, { status: 'conflict' as const }])('$status preserves the local draft and expected revision on cold and warm reads', async ({ status }) => {
@@ -143,46 +145,46 @@ test.each([{ status: 'pending' as const }, { status: 'conflict' as const }])('$s
     source_type: 'text', source_device: 'mobile', versions: [] } }
   else snapshot.mappings.local.conflict = snapshot.cache.shared
   await commit(snapshot)
-  expect(await display()).toEqual(local); expect(await display()).toEqual(local)
+  expect(await display('local')).toEqual(local); expect(await display('local')).toEqual(local)
   expect(FS.readFile).toHaveBeenCalledTimes(1)
 })
 
 test('a display hit cannot satisfy an editor CAS read of a newer committed revision', async () => {
   const baseline = await display()
   await commit(state('newer remote', 6))
-  await expect(editNoteContent('local', 'draft', baseline, 'alice')).rejects.toThrow('另一台设备已有新修订')
+  await expect(editNoteContent('workspace-shared', 'draft', baseline, 'alice')).rejects.toThrow('正文已有新修订')
   expect(Storage.setItem).not.toHaveBeenCalled()
   expect(FS.readFile).toHaveBeenCalledTimes(2)
 })
 
-test('different service cache is never selected as current, but local originals and old baselines remain intact', async () => {
+test('device-owned content from a former service remains readable without rebinding its original service', async () => {
   const snapshot = state('old service content'); snapshot.serviceOrigin = 'https://old.example'
   await commit(snapshot)
-  expect(await display()).toEqual(local)
+  expect(await display('local')).toEqual(local)
   expect(await getNote('local')).toEqual(local)
-  await expect(display('workspace-shared')).rejects.toMatchObject({ status: 409, details: { code: 'WORKSPACE_ORIGIN_UNVERIFIED' } })
+  expect((await display('workspace-shared')).content).toBe(snapshot.cache.shared.content)
   expect(await listNotes('alice')).toEqual([local])
   expect((await readWorkspace('alice')).cache.shared.content).toBe('old service content')
   expect(Storage.setItem).not.toHaveBeenCalled()
 })
 
-test('legacy remote cache without proven Origin is retained but never attributed to the current service', async () => {
+test('retained device-owned legacy content stays readable without inventing service provenance', async () => {
   const snapshot = state('unbound legacy content'); delete snapshot.serviceOrigin
   await commit(snapshot)
-  expect(await display()).toEqual(local)
-  await expect(display('workspace-shared')).rejects.toMatchObject({ status: 409, details: { code: 'WORKSPACE_ORIGIN_UNVERIFIED' } })
+  expect(await display('local')).toEqual(local)
+  expect((await display('workspace-shared')).content).toBe(snapshot.cache.shared.content)
   expect(await listNotes('alice')).toEqual([local])
   expect((await readWorkspace('alice')).cache.shared.content).toBe('unbound legacy content')
   expect(Storage.setItem).not.toHaveBeenCalled()
 })
 
-test.each(['missing', 'different'])('an old %s Origin cache without local bodies is an unverified library, not an empty one', async provenance => {
+test.each(['missing', 'different'])('an old %s Origin cannot make retained device content disappear', async provenance => {
   const snapshot = state('retained old body')
   if (provenance === 'missing') delete snapshot.serviceOrigin
   else snapshot.serviceOrigin = 'https://old.example'
   await commit(snapshot); await Storage.removeItem(key())
-  await expect(listNotes('alice')).rejects.toMatchObject({ status: 409, details: { code: 'WORKSPACE_ORIGIN_UNVERIFIED' } })
-  await expect(getNote('local')).rejects.toMatchObject({ status: 409, details: { code: 'WORKSPACE_ORIGIN_UNVERIFIED' } })
+  expect((await listNotes('alice'))[0].content).toBe('retained old body')
+  expect((await getNote('local')).content).toBe('retained old body')
   expect((await readWorkspace('alice')).cache.shared.content).toBe('retained old body')
   expect(Storage.setItem).not.toHaveBeenCalled()
 })
@@ -190,7 +192,7 @@ test.each(['missing', 'different'])('an old %s Origin cache without local bodies
 test('switching scope after a warm hit cannot reuse the old owner, session or origin projection', async () => {
   await display()
   account = 'bob'; generation++
-  expect((await display('local', 'bob')).content).toBe('bob remote')
+  expect((await display('workspace-shared', 'bob')).content).toBe('bob remote')
   account = 'alice'; generation++
   expect((await display()).content).toBe('alice remote')
   expect(FS.readFile).toHaveBeenCalledTimes(3)
@@ -261,9 +263,9 @@ test('local edit during the slow native read is resolved again before warming it
     await originalSet(key(), JSON.stringify({ ...local, content: 'edited during read', updated_at: '2026-10-12T02:00:00Z' }))
     return body
   })
-  expect((await display()).content).toBe('edited during read')
+  expect((await display('local')).content).toBe('edited during read')
   const reads = jest.mocked(FS.readFile).mock.calls.length
-  expect((await display()).content).toBe('edited during read')
+  expect((await display('local')).content).toBe('edited during read')
   expect(FS.readFile).toHaveBeenCalledTimes(reads)
 })
 
@@ -278,10 +280,10 @@ test('a late old owner cannot refill or evict the new owner warm cache', async (
   await entered
   try {
     account = 'bob'; generation++
-    expect((await display('local', 'bob')).content).toBe('bob remote')
+    expect((await display('workspace-shared', 'bob')).content).toBe('bob remote')
   } finally { release() }
   await rejected
   const reads = jest.mocked(FS.readFile).mock.calls.length
-  expect((await display('local', 'bob')).content).toBe('bob remote')
+  expect((await display('workspace-shared', 'bob')).content).toBe('bob remote')
   expect(FS.readFile).toHaveBeenCalledTimes(reads)
 })

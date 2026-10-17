@@ -141,6 +141,7 @@ export async function workspaceViews(local: Note[], snapshot?: WorkspaceState) {
     const rows = local.map(note => {
       const mapping = Object.values(state.mappings).find(value => value.localIds.includes(note.id))
       const row = state.cache[mapping?.key || note.workspace_key || '']
+      if (row?.deleted) return { ...note, deleted: true }
       const baseline = row?.versions.find(version => version.id === `retained-${row.key}`)
       return !note.deleted && row && mapping?.pending && baseline?.content === note.content && row.content !== note.content
         ? { ...workspaceNote(row, mapping), id: note.id, content_id: note.content_id || row.key, task_id: note.task_id } : note

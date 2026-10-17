@@ -193,6 +193,7 @@ function resolveNote(id: string, value: string | null, state: WorkspaceState): N
     const mapping = Object.values(state.mappings).find(row => row.localIds.includes(id))
     const row = state.cache[local?.workspace_key || mapping?.key || id.replace(/^workspace-/, '')]
     if (local) {
+      if (row?.deleted) return { ...local, deleted: true }
       const baseline = row?.versions.find(version => version.id === `retained-${row.key}`)
       if (!local.deleted && row && mapping?.pending && baseline?.content === local.content && row.content !== local.content)
         return { ...workspaceNote(row, mapping), id: local.id, content_id: local.content_id || row.key, task_id: local.task_id }

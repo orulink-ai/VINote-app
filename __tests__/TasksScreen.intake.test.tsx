@@ -34,7 +34,7 @@ test('recording task shows independent branches and opens the same recording wit
   ;(useRecordingProgress as jest.Mock).mockReturnValue({ owner: `owner-intake-${counter + 1}`, recordId: 'original-record', text: '转写：正在等待服务\n说话人：本机分析 42%', speakerPercent: 42 })
   await act(async () => { view = Renderer.create(<TasksScreen {...props} />) })
   const rows = view.root.findAllByType(ProcessingProgress)
-  expect(rows.map(row => row.props.label)).toEqual(['转写音频', '识别说话人'])
+  expect(rows.map(row => row.props.label)).toEqual(['提交识别的音频', '识别说话人'])
   expect(rows[0].props.percent).toBeUndefined(); expect(rows[1].props.percent).toBe(42)
   expect(text()).not.toContain('正在等待服务')
   await act(async () => buttons().find(node => node.props.title === '查看录音与恢复入口')!.props.onPress())

@@ -9,6 +9,11 @@ import { beginVerification, finishVerification, pauseRemote } from '../src/lib/s
 jest.mock('../src/lib/storage', () => ({ readSession: jest.fn(async () => ({ expires_at: Date.now() / 1000 + 3600 })) }))
 jest.mock('../src/lib/supabase', () => ({ accessToken: jest.fn(async () => 'synthetic-token') }))
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve() }
+// LAST is enqueued after paced audio; finalization has its own budget from that ACK.
+const expireFinalization = async () => {
+  await jest.advanceTimersByTimeAsync(600)
+  await jest.advanceTimersByTimeAsync((.6 * 1.5 + 90) * 1000)
+}
 const pcm = (bytes: number) => 'AAAA'.repeat(Math.floor(bytes / 3)) + (bytes % 3 === 1 ? 'AA==' : bytes % 3 === 2 ? 'AAA=' : '')
 class Socket {
   static current: Socket
@@ -46,7 +51,7 @@ test.each(['server_error', 'socket_error', 'socket_close', 'deadline'] as const)
   if (origin === 'server_error') socket.event({ type: 'session.error', code: 'unknown_result' })
   if (origin === 'socket_error') socket.onerror?.()
   if (origin === 'socket_close') socket.onclose?.({ code: 1006, reason: 'PRIVATE_REASON' })
-  if (origin === 'deadline') await jest.advanceTimersByTimeAsync(90900)
+  if (origin === 'deadline') await expireFinalization()
   const error = await caught
   expect(error).toBeInstanceOf(ASRServiceFailure)
   expect(error.code).toBe('unknown_result')
@@ -104,7 +109,7 @@ test.each(['server_error', 'socket_error', 'socket_close', 'deadline'] as const)
   if (origin === 'server_error') socket.event({ type: 'session.error', code: 'unknown_result', text: 'PRIVATE_TEXT', message: 'PRIVATE_REASON', id: 'PRIVATE_ID' })
   if (origin === 'socket_error') socket.onerror?.()
   if (origin === 'socket_close') socket.onclose?.({ code: 1006, reason: 'PRIVATE_REASON' })
-  if (origin === 'deadline') await jest.advanceTimersByTimeAsync(90900)
+  if (origin === 'deadline') await expireFinalization()
   const error = await caught, diagnostic = readASRDiagnostic(error)
   expect(error).toBeInstanceOf(ASRServiceFailure)
   expect(diagnostic).toMatchObject({ origin, category: 1, readerMode: 1, audioAttempted: 1,

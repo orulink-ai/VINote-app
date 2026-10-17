@@ -66,29 +66,30 @@ test('a new local object remains local: no cloud scan, mapping, pending, or atta
   expect((await getNote(local.id)).content).toBe(local.content)
 })
 
-test('explicit enable uses the same canonical key and fresh source revision, with no originals', async () => {
+test('a retained explicit sync choice is metadata only after cancellation and cannot upload originals', async () => {
   await setItemSyncPolicy(local.id, 'sync', 'A'); await syncWorkspace()
-  const put = mutations().find(([, init]) => init?.method === 'PUT')!
-  expect(put[0]).toBe('/api/workspace/notes/canonical-one')
-  expect(JSON.parse(put[1]!.body as string)).toMatchObject({ base_revision: 0, content: local.content })
-  expect(mutations().every(([path]) => !path.includes('attachments'))).toBe(true)
+  expect(integrationJson).not.toHaveBeenCalled()
+  expect(prepareWorkspaceMarkdown).not.toHaveBeenCalled()
+  expect((await getNote(local.id)).content).toBe(local.content)
   expect(await readItemSyncPolicy(local.id, 'A')).toMatchObject({ contentId: 'canonical-one', mode: 'sync' })
 })
 
-test('canonical sync preserves a verified device recording relation rather than inferring it from cloud metadata', async () => {
+test('legacy sync preference leaves the current-device recording association readable without creating a cloud row', async () => {
   await Storage.setItem('vinote:A:note:local-one', JSON.stringify({ ...local, task_id: 'real-local-recording', source_type: 'meeting_recording' }))
   jest.mocked(listRecordings).mockResolvedValue([{ id: 'real-local-recording', title: 'recording', uri: 'file:///device-only.m4a', duration: 4690, createdAt: local.created_at }])
   await setItemSyncPolicy(local.id, 'sync', 'A'); await syncWorkspace()
-  expect((await getNote(`workspace-${local.content_id}`)).task_id).toBe('real-local-recording')
+  expect((await getNote(local.id)).task_id).toBe('real-local-recording')
+  await expect(getNote(`workspace-${local.content_id}`)).rejects.toMatchObject({ status: 404 })
   expect(JSON.stringify(mutations())).not.toContain('file:///device-only.m4a')
 })
 
 test('a same-named distinct canonical content is not silently merged or uploaded by another item grant', async () => {
   await Storage.setItem('vinote:A:note:local-two', JSON.stringify({ ...local, id: 'local-two', content_id: 'canonical-two' }))
   await setItemSyncPolicy(local.id, 'sync', 'A'); await syncWorkspace()
-  expect(mutations().map(([path]) => path)).toEqual(['/api/workspace/notes/canonical-one'])
+  expect(integrationJson).not.toHaveBeenCalled()
+  expect((await getNote('local-two')).content_id).toBe('canonical-two')
   expect((await readItemSyncPolicy('local-two', 'A')).mode).toBe('local-only')
-  expect(Object.values((await readWorkspace('A')).mappings).map(row => row.key)).toEqual(['canonical-one'])
+  expect(Object.values((await readWorkspace('A')).mappings)).toEqual([])
 })
 
 test('an existing ACK preserves sync; mapping/cache without acknowledgement is not authorization', async () => {
@@ -100,7 +101,7 @@ test('an existing ACK preserves sync; mapping/cache without acknowledgement is n
   await syncWorkspace(); expect(integrationJson).not.toHaveBeenCalled()
 })
 
-test('pause retains body/history and unknown operation; exact GET does not resume send or receive', async () => {
+test('pause retains body/history and unknown operation; cancelled receipt queries cannot send or receive', async () => {
   const state = acknowledged()
   state.mappings['note:local-one'].pending = { dispatched: true, signature: 'pending', body: { base_revision: 7, operation_id: 'old-op', title: local.title, content: local.content, source_type: 'text', source_device: 'App', versions: [] } }
   await writeWorkspace('A', state)
@@ -108,9 +109,8 @@ test('pause retains body/history and unknown operation; exact GET does not resum
   await setItemSyncPolicy(local.id, 'local-only', 'A')
   await syncWorkspace()
   expect(integrationJson).not.toHaveBeenCalled()
-  const receipt = await queryWorkspaceOperation(remote.key, 'old-op', 'A')
-  expect(receipt.acknowledged_revision).toBe(8)
-  expect(jest.mocked(integrationJson).mock.calls.map(([path]) => path)).toEqual(['/api/workspace/operations/old-op?note_key=canonical-one'])
+  await expect(queryWorkspaceOperation(remote.key, 'old-op', 'A')).rejects.toThrow('跨设备同步已取消')
+  expect(integrationJson).not.toHaveBeenCalled()
   expect((await readWorkspace('A')).mappings['note:local-one'].pending?.body.operation_id).toBe('old-op')
   expect((await readItemSyncPolicy(local.id, 'A')).mode).toBe('local-only')
   expect(await Storage.getItem('vinote:A:note-history:local-one')).toContain('original')
@@ -122,40 +122,39 @@ test('unknown original request 404 keeps intent and never turns into a new POST'
   state.mappings['note:local-one'].deleteOperation = { operation_id: 'old-op', base_revision: 7, action: 'delete', serviceOrigin: integrationBaseUrl }
   await writeWorkspace('A', state)
   jest.mocked(integrationJson).mockRejectedValue(new IntegrationError('not found', 404, 'NOT_FOUND'))
-  await expect(queryWorkspaceOperation(remote.key, 'old-op', 'A')).rejects.toMatchObject({ status: 404 })
+  await expect(queryWorkspaceOperation(remote.key, 'old-op', 'A')).rejects.toThrow('跨设备同步已取消')
+  expect(integrationJson).not.toHaveBeenCalled()
   expect((await readWorkspace('A')).mappings['note:local-one'].deleteOperation?.operation_id).toBe('old-op')
   expect(mutations()).toEqual([])
 })
 
-test('old server blocks explicit enabled writes before body or attachments are sent', async () => {
+test('legacy capability responses cannot reactivate cancelled synchronization', async () => {
   await setItemSyncPolicy(local.id, 'sync', 'A')
   jest.mocked(integrationJson).mockResolvedValue({ mode: 'shared', capabilities: { notes: true } } as never)
-  await expect(syncWorkspace()).rejects.toThrow('尚不支持逐条同步')
+  await syncWorkspace()
+  expect(integrationJson).not.toHaveBeenCalled()
   expect(mutations()).toEqual([]); expect(prepareWorkspaceMarkdown).not.toHaveBeenCalled()
   expect((await readItemSyncPolicy(local.id, 'A')).mode).toBe('sync')
 })
 
-test('an unreadable or incomplete capability response is unverified, never a false upgrade requirement', async () => {
+test('unreadable capabilities are not consulted when reading this device library', async () => {
   await setItemSyncPolicy(local.id, 'sync', 'A')
   jest.mocked(integrationJson).mockResolvedValue({ mode: 'shared' } as never)
-  await expect(syncWorkspace()).rejects.toThrow('协议能力尚未核验')
+  await syncWorkspace()
   expect(mutations()).toEqual([])
   jest.mocked(integrationJson).mockRejectedValue(new Error('账号尚未核验'))
-  await expect(syncWorkspace()).rejects.toThrow('账号尚未核验')
+  await syncWorkspace()
+  expect(integrationJson).not.toHaveBeenCalled()
   expect(mutations()).toEqual([])
 })
 
-test('pause during a cloud read rejects the late body and preserves the previous cached revision', async () => {
+test('legacy policy changes cannot start a cloud read or replace the retained cached body', async () => {
   await writeWorkspace('A', acknowledged()); await Storage.removeItem('vinote:A:note:local-one')
-  let finish!: (value: never) => void
-  jest.mocked(integrationJson).mockImplementation(async (path) => path.endsWith('/status')
-    ? { mode: 'shared', capabilities: { item_sync_policy: 1, operation_receipts: 1 } } as never
-    : new Promise(resolve => { finish = resolve }))
-  const work = syncWorkspace()
-  while (!finish) await new Promise<void>(resolve => setTimeout(resolve, 0))
+  jest.mocked(integrationJson).mockRejectedValue(new Error('must not read cloud'))
+  await syncWorkspace()
   await setItemSyncPolicy(`workspace-${remote.key}`, 'local-only', 'A')
-  finish({ ...remote, revision: 9, content: 'late remote body' } as never)
-  await expect(work).rejects.toThrow('同步选择已变化')
+  await syncWorkspace()
+  expect(integrationJson).not.toHaveBeenCalled()
   expect((await readWorkspace('A')).cache[remote.key].revision).toBe(7)
   expect((await getNote(`workspace-${remote.key}`)).content).toBe(remote.content)
 })

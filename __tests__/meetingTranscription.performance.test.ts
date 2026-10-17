@@ -2,11 +2,15 @@ import { NativeModules } from 'react-native'
 import FS from 'react-native-fs'
 import { recognizeInterval } from '../src/lib/asrStream'
 import { transcribe, type TranscriptionCheckpoint } from '../src/lib/meetingCloud'
+import { transitionIdentity } from '../src/lib/sessionIdentity'
+import { beginVerification, finishVerification } from '../src/lib/sessionGate'
 jest.mock('../src/lib/asrStream', () => ({ recognizeInterval: jest.fn(), ASRSessionLimit: class extends Error {} }))
 const source = { size: 10000, modifiedMs: 1700000000000 }
-const options = () => ({ owner: 'owner', guard: async () => {}, progress: jest.fn(), save: jest.fn(async (_cp: TranscriptionCheckpoint) => {}) })
+const options = () => ({ owner: 'owner', guard: async () => {}, progress: jest.fn(), save: jest.fn(async (_cp: TranscriptionCheckpoint) => {}),
+  recordedAudioPolicy: { protocol: 1, supported: true, strategy: 'adaptive_pause', maxSessionAudioBytes: 64 * 1024 * 1024, policySource: 'service_budget' } as const })
 beforeEach(() => {
   jest.clearAllMocks()
+  transitionIdentity('owner'); finishVerification(beginVerification('owner'), 'verified')
   jest.mocked(recognizeInterval).mockReset().mockResolvedValue('新发言')
   jest.mocked(FS.stat).mockResolvedValue({ size: source.size, mtime: new Date(source.modifiedMs) } as never)
   FS.unlink = jest.fn(async () => {})
@@ -19,12 +23,13 @@ test('recovers historical middle interval without uploading it again', async () 
   expect(NativeModules.MeetingAudio.toWav).not.toHaveBeenCalled()
   expect(jest.mocked(recognizeInterval).mock.calls.map(args => [args[2], args[3]])).toEqual([[0, 60], [120, 130]])
 })
-test('changing source fingerprint prevents reuse of another audio recording', async () => {
+test('changing source fingerprint preserves old evidence and blocks audio submission', async () => {
   const checkpoint: TranscriptionCheckpoint = { version: 3, model: 'model', duration: 130, source: { ...source, size: 1 }, parts: ['旧发言'] }
-  const result = await transcribe('file:///original.m4a', 'model', { ...options(), checkpoint })
-  expect(result).not.toContain('旧发言')
-  expect(recognizeInterval).toHaveBeenCalledTimes(1)
-  expect(NativeModules.MeetingAudio.toWav).toHaveBeenCalledTimes(1)
+  const before = JSON.stringify(checkpoint)
+  await expect(transcribe('file:///original.m4a', 'model', { ...options(), checkpoint })).rejects.toThrow('不一致')
+  expect(JSON.stringify(checkpoint)).toBe(before)
+  expect(recognizeInterval).not.toHaveBeenCalled()
+  expect(NativeModules.MeetingAudio.toWav).not.toHaveBeenCalled()
 })
 test('rebuilds evicted audio while preserving completed recognition', async () => {
   NativeModules.MeetingAudio.wavInfo.mockRejectedValueOnce(new Error('evicted'))

@@ -95,6 +95,20 @@ test('an acknowledged deleted cache cannot be resurrected by an old unknown writ
   expect(detachWorkspace(state).cache.stable.versions.map(version => version.content)).toContain('latest draft')
 })
 
+test('an acknowledged tombstone also hides a linked unsent device draft until explicit restore', async () => {
+  const state = fixture(); state.cache.stable = { ...row, deleted: true }
+  state.mappings.original.localIds = ['linked-original']
+  await Storage.setItem('vinote:A:workspace', JSON.stringify(state))
+  await Storage.setItem('vinote:A:note:linked-original', JSON.stringify({ id: 'linked-original', workspace_key: 'stable',
+    content_id: 'stable', title: 'Device draft', content: 'unsent device draft', status: 'done', created_at: row.created_at, updated_at: row.updated_at }))
+  expect(await listNotes('A')).toEqual([])
+  expect(await getNote('linked-original')).toMatchObject({ deleted: true, content: 'unsent device draft' })
+  await setNoteDeleted('linked-original', false, 'A')
+  expect((await getNote('linked-original')).content).toBe('unsent device draft')
+  expect((await listNotes('A')).map(note => note.id)).toContain('linked-original')
+  expect(fetch).not.toHaveBeenCalled()
+})
+
 test('export and sharing use the saved Markdown with distinct system actions', async () => {
   const note = await createTextNote('Document', '# saved', 'export-id')
   await exportNoteFile(note); await shareNoteFile(note)
