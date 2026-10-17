@@ -50,3 +50,10 @@ GitHub 只读查询 PR10 statusCheckRollup=[]；仓库 Actions workflows total_c
 ### 后续变更
 
 待追加实际CI/服务部署/无推理手机证据，不将其混入以上离线结果。
+
+## 2026-10-17 10:55 Asia/Shanghai｜wugui / Codex｜CI跨时区测试修正
+
+- 产品源码已冻结于1363311并已push；未修改任何产品/配置文件。
+- 首次GitHub run 38996608865：配置、脚本、TypeScript通过；Jest为122suite/1109test通过、1项失败。既有recordingTitle.test.ts把输入+08时区的10月12日写死，而产品按设备当地时间格式化，UTC runner正确得到10月11日22:58。
+- Red：本机显式TZ=UTC定向18项中复现同一1项失败。Green：断言改用输入时间在当前时区的Intl日历日期；分别TZ=UTC和Asia/Shanghai定向18/18通过，网络守卫开启。保留原日期来源、主题和未知时间断言，不固定CI时区掩盖问题。
+- 本次仅测试与本档案追加中文commit并push，第二次GitHub实际结果在交接报告登记，不重跑无新变化的产品测试或扩大功能。

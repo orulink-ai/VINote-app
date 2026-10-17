@@ -6,7 +6,10 @@ test.each(['', 'invalid', 'not-a-time'])('invalid recorded time %s never invents
 test('actual supplied timestamp and generated heading are used without a model request', () => {
   const title = recordingTitle('2026-10-12T06:58:47+08:00', '真实主题')
   const date = new Date('2026-10-12T06:58:47+08:00')
-  expect(title).toContain(`${date.getFullYear()}-10-12`)
+  // Titles use the device's calendar date, which can differ from the timestamp's
+  // original +08:00 date (the UTC runner sees the previous evening).
+  const calendarDate = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
+  expect(title).toContain(calendarDate)
   expect(title).toContain('｜真实主题')
   expect(summaryTopic('# **真实主题**\n正文')).toBe('真实主题')
   expect(summaryTopic('# 会议纪要\n正文')).toBeUndefined()
