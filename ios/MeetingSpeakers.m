@@ -4,8 +4,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include "SpeakerAudioRange.h"
 
 @interface MeetingSpeakers : RCTEventEmitter
+- (void)analyzeRange:(NSString *)uri start:(double)start end:(NSNumber *)end jobId:(NSString *)jobId
+           resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject;
 @end
 
 typedef struct { __unsafe_unretained MeetingSpeakers *module; __unsafe_unretained NSString *jobId; int last; } SpeakerProgress;
@@ -83,6 +87,13 @@ RCT_REMAP_METHOD(embeddings, embeddings:(NSString *)uri windows:(NSArray *)windo
   @finally { if (file) fclose(file); if (extractor) SherpaOnnxDestroySpeakerEmbeddingExtractor(extractor); }
 }
 RCT_REMAP_METHOD(analyze, analyze:(NSString *)uri jobId:(NSString *)jobId resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  [self analyzeRange:uri start:0 end:nil jobId:jobId resolver:resolve rejecter:reject];
+}
+RCT_REMAP_METHOD(analyzeWindow, analyzeWindow:(NSString *)uri start:(double)start end:(double)end jobId:(NSString *)jobId resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  [self analyzeRange:uri start:start end:@(end) jobId:jobId resolver:resolve rejecter:reject];
+}
+- (void)analyzeRange:(NSString *)uri start:(double)start end:(NSNumber *)end jobId:(NSString *)jobId
+           resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject {
   const SherpaOnnxOfflineSpeakerDiarization *engine = NULL;
   const SherpaOnnxOfflineSpeakerDiarizationResult *result = NULL;
   const SherpaOnnxOfflineSpeakerDiarizationSegment *segments = NULL;
@@ -96,19 +107,15 @@ RCT_REMAP_METHOD(analyze, analyze:(NSString *)uri jobId:(NSString *)jobId resolv
     file = fopen(path.fileSystemRepresentation, "rb");
     uint8_t header[44];
     if (!file || fread(header, 1, 44, file) != 44 || memcmp(header, "RIFF", 4) || memcmp(header + 8, "WAVEfmt ", 8) || memcmp(header + 36, "data", 4)) @throw [NSException exceptionWithName:@"SpeakerAudio" reason:@"音频缓存不完整" userInfo:nil];
-    uint16_t format, channels, bits; uint32_t rate, bytes;
-    memcpy(&format, header + 20, 2); memcpy(&channels, header + 22, 2); memcpy(&rate, header + 24, 4); memcpy(&bits, header + 34, 2); memcpy(&bytes, header + 40, 4);
-    int64_t size = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil].fileSize;
-    if (format != 1 || channels != 1 || rate != 16000 || bits != 16 || bytes != size - 44 || !bytes || bytes % 2 || bytes / 2 > 16000 * 7200) @throw [NSException exceptionWithName:@"SpeakerAudio" reason:@"本机分析需要完整的 16k 单声道音频，支持两小时内录音" userInfo:nil];
-    int32_t count = bytes / 2;
+    struct stat info;
+    if (fstat(fileno(file), &info) || !S_ISREG(info.st_mode) || info.st_size < 44) @throw [NSException exceptionWithName:@"SpeakerAudio" reason:@"音频缓存不完整" userInfo:nil];
+    VINoteSpeakerRange range;
+    double stop = end ? end.doubleValue : VINoteSpeakerLE32(header + 40) / (2.0 * VINOTE_SPEAKER_SAMPLE_RATE);
+    if (!VINoteSpeakerMakeRange(header, (uint64_t)info.st_size, start, stop, &range)) @throw [NSException exceptionWithName:@"SpeakerAudio" reason:@"说话人分析区间或音频无效；请使用新版分窗流程，原件已保留" userInfo:nil];
+    int32_t count = (int32_t)range.sampleCount;
     samples = malloc((size_t)count * sizeof(float));
     if (!samples) @throw [NSException exceptionWithName:@"SpeakerMemory" reason:@"本机内存不足，请稍后重试" userInfo:nil];
-    int16_t buffer[32768]; int32_t offset = 0;
-    while (offset < count) {
-      size_t n = MIN(32768, count - offset);
-      if (fread(buffer, sizeof(int16_t), n, file) != n) @throw [NSException exceptionWithName:@"SpeakerAudio" reason:@"音频缓存读取失败" userInfo:nil];
-      for (size_t i = 0; i < n; i++) samples[offset++] = buffer[i] / 32768.0f;
-    }
+    if (!VINoteSpeakerReadRange(file, range, samples)) @throw [NSException exceptionWithName:@"SpeakerAudio" reason:@"音频缓存区间读取失败" userInfo:nil];
     NSString *bundlePath = [NSBundle.mainBundle pathForResource:@"VINoteSpeakerModels" ofType:@"bundle"];
     NSBundle *bundle = bundlePath ? [NSBundle bundleWithPath:bundlePath] : nil;
     NSString *segmentation = [bundle pathForResource:@"segmentation" ofType:@"onnx"];
@@ -126,11 +133,13 @@ RCT_REMAP_METHOD(analyze, analyze:(NSString *)uri jobId:(NSString *)jobId resolv
     result = SherpaOnnxOfflineSpeakerDiarizationProcessWithCallback(engine, samples, count, progressCallback, &progress);
     if (!result) @throw [NSException exceptionWithName:@"SpeakerAnalysis" reason:@"说话人分析失败，请重试" userInfo:nil];
     int32_t total = SherpaOnnxOfflineSpeakerDiarizationResultGetNumSegments(result);
-    segments = SherpaOnnxOfflineSpeakerDiarizationResultSortByStartTime(result);
-    if (!segments || total < 1) @throw [NSException exceptionWithName:@"SpeakerAnalysis" reason:@"未检测到有效发言，请检查原声" userInfo:nil];
+    if (total < 0) @throw [NSException exceptionWithName:@"SpeakerAnalysis" reason:@"说话人时间轴无效" userInfo:nil];
+    if (total > 0) segments = SherpaOnnxOfflineSpeakerDiarizationResultSortByStartTime(result);
+    if (total > 0 && !segments) @throw [NSException exceptionWithName:@"SpeakerAnalysis" reason:@"说话人时间轴未返回" userInfo:nil];
+    // A silent window is valid confirmed coverage; JS checks the full recording.
     NSMutableArray *turns = [NSMutableArray arrayWithCapacity:total];
     for (int32_t i = 0; i < total; i++) {
-      if (!isfinite(segments[i].start) || !isfinite(segments[i].end) || segments[i].start < 0 || segments[i].end <= segments[i].start) @throw [NSException exceptionWithName:@"SpeakerAnalysis" reason:@"说话人时间轴无效" userInfo:nil];
+      if (!isfinite(segments[i].start) || !isfinite(segments[i].end) || segments[i].start < 0 || segments[i].start >= count / 16000.0 || segments[i].end <= segments[i].start || segments[i].speaker < 0) @throw [NSException exceptionWithName:@"SpeakerAnalysis" reason:@"说话人时间轴无效" userInfo:nil];
       [turns addObject:@{@"start": @(segments[i].start), @"end": @(MIN(segments[i].end, count / 16000.0)), @"speaker": @(segments[i].speaker)}];
     }
     resolve(@{@"provider": @"sherpa-onnx", @"duration": @(count / 16000.0), @"segments": turns});

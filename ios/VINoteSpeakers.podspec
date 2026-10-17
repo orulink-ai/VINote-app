@@ -7,7 +7,7 @@ Pod::Spec.new do |s|
   s.author = 'VINote'
   s.source = { :git => 'https://github.com/k2-fsa/sherpa-onnx.git', :tag => 'v1.12.35' }
   s.platform = :ios, '15.1'
-  s.source_files = 'MeetingSpeakers.m'
+  s.source_files = 'MeetingSpeakers.m', 'SpeakerAudioRange.h'
   s.vendored_frameworks = 'sherpa-runtime/sherpa-onnx.xcframework', 'sherpa-runtime/onnxruntime.xcframework'
   s.resource_bundles = { 'VINoteSpeakerModels' => ['speaker-models/*.onnx'] }
   s.frameworks = 'Foundation', 'Accelerate', 'CoreML'

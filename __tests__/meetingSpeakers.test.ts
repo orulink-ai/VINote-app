@@ -1,5 +1,5 @@
 import { analyzeSpeakers, meetingEvidence, partitionSpeakerTurns } from '../src/lib/meetingSpeakers'
-import { NativeEventEmitter, NativeModules } from 'react-native'
+import { NativeEventEmitter, NativeModules, Platform } from 'react-native'
 import FS from 'react-native-fs'
 import * as clustering from '../src/lib/speakerClustering'
 import type { SpeakerCheckpoint } from '../src/lib/meetingSpeakers'
@@ -60,6 +60,21 @@ describe('bounded long-recording speaker analysis', () => {
       clustering: { method: 'test-unknown', reliable: false, speakerCount: 0, rejectedGroups: 0, silhouette: 0, representativeTurns: 0, analyzedTurns: 0 } }))
   })
   afterEach(() => jest.restoreAllMocks())
+
+  test.each([119, 120, 121, 1376.5485625])('iOS window bridge contract covers %ss without whole-file fallback (native mocked)', async duration => {
+    jest.replaceProperty(Platform, 'OS', 'ios')
+    NativeModules.MeetingAudio.wavInfo.mockResolvedValue(duration)
+    const result = await analyzeSpeakers('file:///original.m4a', control())
+    const calls: unknown[][] = NativeModules.MeetingSpeakers.analyzeWindow.mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    expect(calls.every(args => Number(args[2]) - Number(args[1]) <= 130)).toBe(true)
+    expect(Number(calls.at(-1)![2])).toBe(duration)
+    expect(result.duration).toBe(duration)
+    expect(result.turns[0].start).toBe(0)
+    expect(result.turns.at(-1)?.end).toBe(duration)
+    expect(result.analysis?.completedWindows).toBe(result.analysis?.totalWindows)
+    expect(NativeModules.MeetingSpeakers.analyze).not.toHaveBeenCalled()
+  })
 
   test('78m10s stays within 130s native windows and preserves the full recording offset', async () => {
     NativeModules.MeetingAudio.wavInfo.mockResolvedValue(4690)

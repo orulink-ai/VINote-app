@@ -19,7 +19,7 @@
 
 2026-10-16 仅总结恢复：录音现有操作 Sheet 的“仅生成纪要”先由 recordingSummaryRecovery.ts 只读核验当前账号目录/source fingerprint/原ASR模型/连续完整确认区间及完整speaker窗口与clusteringVersion2，不能用非空transcript证明full。独立generateRecordingSummary只接受明确选择的LLM，不运行ASR/speaker、不改默认选择或原ASR记录，保存新版本并保留旧纪要；更换LLM不复用旧summary checkpoint，同模型同证据可显式继续保存的parts。失败paused，禁止自动恢复summaryOnly；无attempt marker时不宣称unknown请求可安全重放，再次请求需明确确认。该路径不自动飞书交付。summarylib由独立任务维护，离线回归不等于真机/provider验收。
 
-2026-10-12长录音内存修正：Android analyzeWindow每次最多130秒PCM（120秒核心+5秒两侧上下文），逐窗释放engine；JS按源指纹保存完成窗口和绝对偏移，不将各窗局部编号当同一人。超过十分钟或时长未知的录音先保存ASR再分析说话人，另一分支失败仍保留独立成功检查点。无新原生能力的长录音不得回退whole-file分析；iOS长录音原生分窗尚未实现。原件保留，4suite29 tests/AppTS通过；未构建安装或测量新真机峰值，不能宣称系统不会LOW_MEMORY。
+2026-10-12长录音内存修正：Android analyzeWindow每次最多130秒PCM（120秒核心+5秒两侧上下文），逐窗释放engine；JS按源指纹保存完成窗口和绝对偏移，不将各窗局部编号当同一人。超过十分钟或时长未知的录音先保存ASR再分析说话人，另一分支失败仍保留独立成功检查点。无新原生能力的长录音不得回退whole-file分析。原件保留，4suite29 tests/AppTS通过；未构建安装或测量新真机峰值，不能宣称系统不会LOW_MEMORY。2026-10-17补充：iOS源码已补analyzeWindow，SpeakerAudioRange.h校验规范WAV和采样对齐区间，只分配单窗float、定长缓冲读PCM，空静音窗可保存覆盖，旧analyze同受资源预算限制。130秒是与Android一致的单次分配预算，不是模型或整段录音时长限制。C核心离线测试不等于Objective-C/Pod/Sherpa运行通过；仍待macOS构建和iOS真机验收，必须重建原生包。详见当天iOS分窗档案。
 
 2026-10-13 转写：取消按模型名选择12/60秒请求。所有已配置 VILab ASR 使用同一 VLA2 PCM 流式协议；只根据服务明确返回的会话限制续接，不从断网/502猜测限制，不切换模型。v5检查点按来源指纹、模型和已确认起止区间保留证据，兼容同源已确认的旧检查点。实时进度与已保存区间分别展示，只有最终结果落盘后才显示完成。录制期间仅录制，结束后转写与独立说话人分析并行，两者完成再总结。自动纪要图示停止；飞书插件安装/启用与账号授权分开。公网Aliyun 120/340秒真实调用已成功；这不是手机完整长录音验收证据。
 

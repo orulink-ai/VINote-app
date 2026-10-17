@@ -10,3 +10,7 @@
 - 未运行Gradle/安装/手机输入/真实推理，未触碰当前构建；不能声明当前打包APK含本补丁。需下一次原生重建安装和同78分钟录音内存复验。
 - 风险：ONNX本身的固定模型占用、系统整体压力仍存在，无LOW_MEMORY免疫保证；窗口边界与跨窗身份精度未实测；逐窗加载模型及长录音两路顺序执行可能增加耗时。旧Android/iOS原生模块无analyzeWindow时仅120秒内可用旧分析，长录音明确阻止回退；iOS未实现本原生接口，不宣称兼容长录音。
 - 文件：android/app/src/main/java/com/vinoteapp/MeetingSpeakers.kt、src/lib/meetingSpeakers.ts、src/features/recording/generateRecording.ts及两份相关测试。
+
+## 后续补充
+
+- 2026-10-17：见 [iOS 说话人分窗补齐与 Release 地址复核](../../2026-10-17/2026-10-17_101000_wugui_无Issue_iOS说话人分窗补齐/index.md)。补此前缺失的 iOS analyzeWindow 源码与有界 PCM 读取核心；原 JS 检查点/编号/偏移合同及本档案历史证据保留。Windows 离线测试不能代替 iOS 原生构建和第三方推理验收。
