@@ -25,13 +25,21 @@ def deployment = new groovy.json.JsonSlurper().parse(file("../../config/deployme
 def checkReleaseContentService = {
     providers.exec {
         workingDir rootProject.projectDir.parentFile
-        commandLine 'node', 'scripts/validate-deployment.cjs', '--require-generation'
+        commandLine 'node', 'scripts/validate-deployment.cjs', '--require-generation', '--require-integration', '--require-public'
     }.result.get().assertNormalExitValue()
 }
 if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }) checkReleaseContentService()
 gradle.taskGraph.whenReady { graph ->
     if (graph.allTasks.any { it.project == project && it.name.toLowerCase().contains('release') }) checkReleaseContentService()
 }
+// Standalone debug embeds production JS too; it must not ship empty service URLs.
+if (project.hasProperty('vinoteStandalone')) {
+    providers.exec {
+        workingDir rootProject.projectDir.parentFile
+        commandLine 'node', 'scripts/validate-deployment.cjs', '--require-generation', '--require-integration'
+    }.result.get().assertNormalExitValue()
+}
+
 def requestedChannel = project.findProperty('vinoteChannel')
 if (requestedChannel && requestedChannel != (deployment.channel == 'lan' ? 'test' : 'public')) {
     throw new GradleException('Selected deployment does not match requested VINote channel')
@@ -129,7 +137,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 9
-        versionName "0.2.0"
+        versionName "0.1.4"
         buildConfigField "String", "ACCOUNT_PROXY_HOST", groovy.json.JsonOutput.toJson(deployment.accountProxyHost)
         buildConfigField "int", "ACCOUNT_PROXY_PORT", deployment.accountProxyPort.toString()
         buildConfigField 'boolean', 'VINOTE_STANDALONE', project.hasProperty('vinoteStandalone') ? 'true' : 'false'

@@ -112,3 +112,8 @@ SummaryCheckpoint v11仅以相同model/title/source复用完整draft/audit；v8-
 MeetingFiles协议bilibiliDownloadProtocol=1新增专用解析/流式下载/取消/清理，不走共享RN认证网络，不向B站发送VINote凭证/Cookie或依赖代理。逐hop HTTPS/host/public DNS，原生字节预算、超时、AAC/MP4校验及账号/前台取消。它是独立显式文件获取动作，不伪造公网video_url能力、不在412后自动回退。新Android包必需，iOS/旧包禁用。
 
 下载原件归purpose=note的files/accounts，保留original/canonical URL、BV/aid/cid/page/duration及operation，文件库和笔记可查看来源；CDN签名地址不落盘。首次upload复用该operation，已有关联只GET原操作，不把旧unknown/failed换新或自动再ASR；上传/模型必须另行确认。详情和离线/实际边界见docs/bilibili-device-download.md。
+
+
+## 2026-10-17 App 0.1.4 发布配置
+
+用户指定 0.1.4，Android versionCode 9，iOS build 5。test 独立 APK 使用 LAN 模型直连、公网账号/内容/飞书；链接或上传笔记由公网内容后端执行，不保证使用 LAN 模型。所有独立 APK/AAB（包括直接 Gradle standalone）必须显式配置 generationBaseUrl 与 integrationBaseUrl，Release 另限 public 与发布签名；Metro 不受独立包完整配置门槛影响。

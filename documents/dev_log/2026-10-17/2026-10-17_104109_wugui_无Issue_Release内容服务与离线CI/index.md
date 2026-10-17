@@ -62,3 +62,8 @@ GitHub 只读查询 PR10 statusCheckRollup=[]；仓库 Actions workflows total_c
 ## 后续变更：B站平台能力
 
 [平台能力与入口](../2026-10-17_112823_wugui_无Issue_B站链接平台能力/index.md) 扩展capabilities的可选video_url_platforms，对显式B站范围恢复入口，其他视频保持限制。旧device缺该字段时布尔合同仍适用，不修改本档案已有CI/手机/部署证据。本次按用户要求不commit。
+
+
+## 后续变更：0.1.4 发布收尾
+
+[App 0.1.4 发布收尾](../2026-10-17_160000_wugui_无Issue_App014发布收尾/index.md) 将 test 模板改为 LAN 模型＋公网内容/飞书，并对所有独立包强制完整服务配置。仅替代旧配置决策，不改写本档原验证证据。

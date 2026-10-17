@@ -1,9 +1,9 @@
 {
   "channel": "lan",
-  "integrationBaseUrl": "",
+  "integrationBaseUrl": "https://supabase-vinote.orulink.ai/vinote-api",
   "apiBaseUrl": "http://192.168.1.143:9876",
   "authBaseUrl": "https://supabase-vinote.orulink.ai",
   "accountProxyHost": "",
   "accountProxyPort": 7890,
-  "generationBaseUrl": ""
+  "generationBaseUrl": "https://supabase-vinote.orulink.ai/vinote-api"
 }
