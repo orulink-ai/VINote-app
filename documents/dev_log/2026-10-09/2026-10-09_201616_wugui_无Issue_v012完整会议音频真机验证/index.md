@@ -4,7 +4,7 @@
 - 作者wugui，时区Asia/Shanghai；App main/tag v0.1.2，提交00ef489。此任务仅验证，不自动提交或推送私有测试材料。
 - MP4时长1687.022426秒（约28分7秒），46,329,916字节；源文件SHA256 `6d59598989dfd9c438086d9547198554f10d30e1d80540b00231448af98925cb`。
 - 当前App音频导入不接受MP4，因此用FFmpeg `-map 0:a:0 -vn -c:a copy` 提取完整AAC到临时M4A，44.1kHz双声道、20,988,267字节。前后编码音轨数据SHA256均为 `0824581af3812bec6f4792fbaa8b05892da7f93e1c61187e7e53433bc6e8ca4d`，未重编码/删减音轨。
-- 新构建公网standalone Debug，USB设备ABTMUT1C06010498，覆盖安装Success，验证包名com.vinoteapp.dev、版本0.1.2/code7；同发布版业务源码，保留原账号/录音。未依赖本地API或Metro。
+- 新构建公网standalone Debug，USB设备<device-serial>，覆盖安装Success，验证包名com.vinoteapp.dev、版本0.1.2/code7；同发布版业务源码，保留原账号/录音。未依赖本地API或Metro。
 - 验收：完整29个60秒以内分段、顺序/检查点保存、阶段耗时、总结按实际内容组织、本机纪要与音频保留；失败必须记录实际错误及已完成进度。
 - 完整转写、纪要、媒体与会话不写入Git档案；报告仅记录必要计时、数量和脱敏问题。
 

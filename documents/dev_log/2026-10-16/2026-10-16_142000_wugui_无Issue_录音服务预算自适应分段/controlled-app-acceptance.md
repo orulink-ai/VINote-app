@@ -6,7 +6,7 @@
 
 ## 冻结构建与保留资料
 
-主端提供的当前环境：SDK `D:/tool/sdk/android`、设备 `ABTMUT1C06010498`，API8900/Vite3100/Metro8081已由主端恢复。它们未由本任务复核或操作。RAM约3GiB可用；不同时启动大构建/其他重型验证。
+主端提供的当前环境：SDK `D:/tool/sdk/android`、设备 `<device-serial>`，API8900/Vite3100/Metro8081已由主端恢复。它们未由本任务复核或操作。RAM约3GiB可用；不同时启动大构建/其他重型验证。
 
 本项使用已有native PCM reader，原生不需新增。要满足实际安装验收，建议构建带冻结 JS 的 public standalone debug，包名仍 `com.vinoteapp.dev`。普通debug依赖Metro，单装历史APK不能证明加载了本轮JS。不得用正式包/不同applicationId冒充原账号安装。
 
