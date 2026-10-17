@@ -30,3 +30,10 @@
 本轮仅源码、离线模型/网络 mock、真实 SSE 收集器及相邻传输测试。没有真实 ASR/LLM、APK/IPA 构建或安装。root 纯提取部署与两种安装包真实验收需后续明确记录。
 
 未知/终态失败可显式“保留记录，整理其他资料”：按owner串行校验当前operation/task/modelOrigin/models/source和冻结记录一致，归档原回执后仅清输入槽，保留完整设备操作、原件关联及inFlight。不同资料可以新建操作；同字节未知仍阻断。旧选择或并发晚到保存不能清除新的输入；查询、返回、前后台切换不执行此退出动作。
+
+
+## 独立复核补强
+
+- URL按真实HTTP资源规范化，移除fragment；已有旧记录也用同一规则比较。正文提取后，在owner级模型claim中核验历史source_sha256及实际正文相等别名，未知内容不能通过另一URL重发。此检查在LLM marker之前完成。
+- B站关联prepared但source-request缺失时，只有owner/source/modelOrigin均一致、设备记录仍pending且无inFlight/transcript/text/result/active worker才证明未派发。用户显式提交仅补齐同一operation的持久化；已派发或无法证明的记录不恢复。
+- `ModelRequestNotSent`是模型HTTP传输层依据sendAttempt回调产生的类型化零发送证明，保留原账号错误code，不按错误文案推断。remoteRequest检查、XHR open/header失败发生在send前，可清本操作LLM marker并允许明确继续；一旦调用send（包括同步异常）或收到HTTP响应，后续gate失败仍unknown。真实gate/XHR边界测试覆盖HTTP0和send后失效，不替换凭证、不自动重放。

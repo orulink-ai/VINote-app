@@ -42,3 +42,16 @@
 - 保存完成清槽也改为同一串行expected-selection条件，晚到旧结果不清新来源。正常query/返回/前后台不退出或重派发；不同资料可显式新建，同字节未知拦截保留。
 - 新增真实mock LLM断线→unknown→显式退出→不同来源新操作（旧调用不增加）、同源仍阻断、5类stale selection、并发写/保存、账号切换、UI显式确认反例。非手写request掩盖链路。
 - 定向最终12 suites / 192 tests通过，Node384单worker禁网；tsc通过。此前c81提交的全量CI结果不代替本次最新HEAD检查。
+
+
+## Darwin独立review：d9cce33的三项反例
+
+用户转述独立reviewer的内存真实模块复现：fragment别名使同正文LLM2次；B站clientpending→associationprepared→source-request写失败使HTTP0仍无法补齐；LLM marker后gate checking在HTTP前拒绝却永久unknown。本次针对性修复，不改服务端或版本。
+
+1. URL规范化去fragment并兼容历史原URL比较；正文提取后按source_sha256或实际相同正文扫描同owner未知别名，owner级串行claim后才写LLM marker。新增fragment、不同URL同sha、不同URL同正文但sha不同三种反例，LLM计数均保持1。
+2. 新增recoverPreparedClientNote，要求原clientpending、owner/Origin/source一致，且无active worker/转写/正文/结果/inFlight。B站prepared关联和缺失receipt仅能补齐同一操作；真实首次submit制造receipt写失败，确认ASR/LLM/提取均0，再次显式submit同operation只执行1次。已有派发证据拒绝恢复。补回B站operation与file.id一致校验。
+3. textStream在xhr.send调用前提供sendAttempt证据，apiTextStream将remoteRequest创建也纳入边界；只在从未send时抛ModelRequestNotSent。保留SESSION_NOT_VERIFIED等原code；pipeline按类型而非文案清LLM marker。真实sessionGate→remoteRequest→api→textStream→XHR测试：checking前HTTP0可明确继续；send后checking HTTP1保持unknown不重发；XHR setup失败HTTP0同样可继续。
+
+- 此轮修复后新增/补强回归，未伪称全部先写测试；Red来源为用户转述Darwin对d9的复现。旧“不同来源”fixture原本给了相同正文/hash，已改为确实不同正文，保留独立相同正文别名反例。
+- 最终本地定向：16 suites / 296 tests passed，Node384单worker、全程offline guard；包括14套件218及apiAccount/sessionGate两套件78。TypeScript通过，diff按既有CRLF规则通过。
+- 新传输错误边界未改HTTP刷新/服务地址/Token存储；类型保留原账号错误code。没有真实网络模型调用、原生构建或修改其他checkout。最终CI以本追加提交为准，仍等待独立复审，不合并。

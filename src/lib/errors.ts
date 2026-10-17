@@ -2,6 +2,15 @@ export class ApiError extends Error {
   constructor(message: string, public status: number, public details?: { code?: string; requestId?: string }) { super(message) }
 }
 export class TransportError extends Error {}
+/** Issued by the model transport only when no HTTP send was attempted. */
+export class ModelRequestNotSent extends Error {
+  readonly dispatchCode = 'MODEL_REQUEST_NOT_SENT'
+  get code() {
+    const value = this.reason && typeof this.reason === 'object' && 'code' in this.reason ? this.reason.code : undefined
+    return typeof value === 'string' ? value : this.dispatchCode
+  }
+  constructor(public readonly reason: unknown) { super(reason instanceof Error ? reason.message : '请求尚未发送，请核验账号后继续') }
+}
 export async function decodeResponse<T>(response: Response): Promise<T> {
   const text = await response.text()
   let data: any

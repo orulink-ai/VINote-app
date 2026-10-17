@@ -187,6 +187,7 @@ test('unknown operation can be explicitly archived and another source processed 
   expect(chatCompletion).toHaveBeenCalledTimes(calls)
   const control = require('../src/lib/integration') as { operationId: jest.Mock }
   control.operationId.mockReturnValueOnce('22222222-2222-4222-8222-222222222222')
+  api.mockResolvedValueOnce({ ...extracted, text: '另一份不同正文', source_sha256: 'c'.repeat(64) })
   const next = await submitIntake('owner', { mode: 'url', url: 'https://different.example/source' })
   await launchClientNote('owner', next)
   expect(next.operationId).not.toBe(first.operationId)
@@ -222,4 +223,27 @@ test('changed owner cannot release another account input or inference marker', a
   await expect(leaveClientIntake('owner', first)).rejects.toThrow('账号')
   expect(await Storage.getItem(key)).toBe(record)
   expect(await Storage.getItem('vinote:owner:note-intake')).toBe(slot)
+})
+
+test('Bilibili pending + prepared association survives a missing source receipt and explicitly finishes the same operation', async () => {
+  const audio = { ...file, bilibiliSource: { platform: 'bilibili' as const, operationId: file.id, originalUrl: 'https://www.bilibili.com/video/BV1234567890', canonicalUrl: 'https://www.bilibili.com/video/BV1234567890?p=1', bvid: 'BV1234567890', aid: '1', cid: '1', page: 1, duration: 10 } }
+  jest.mocked(FS.readFile).mockResolvedValue(JSON.stringify(audio))
+  const original = jest.mocked(Storage.setItem).getMockImplementation()!
+  let fail = true
+  jest.mocked(Storage.setItem).mockImplementation(async (key, value) => {
+    if (fail && key.includes(':source-request:')) { fail = false; throw new Error('receipt unavailable') }
+    return original(key, value)
+  })
+  try {
+    await expect(submitIntake('owner', { mode: 'file', url: '', file: audio })).rejects.toThrow('receipt unavailable')
+    expect(transcribe).not.toHaveBeenCalled(); expect(chatCompletion).not.toHaveBeenCalled(); expect(api).not.toHaveBeenCalled()
+    expect((await listLocalFileAssociations('owner', file.id))[0].state).toBe('prepared')
+    expect(await Storage.getItem(`vinote:owner:source-request:${file.id}`)).toBeNull()
+    const receipt = await submitIntake('owner', { mode: 'file', url: '', file: audio })
+    await launchClientNote('owner', receipt)
+    expect(receipt.operationId).toBe(file.id)
+    expect((await Storage.getAllKeys()).filter(key => key.includes(':client-note:'))).toHaveLength(1)
+    expect(await Storage.getItem(`vinote:owner:source-request:${file.id}`)).not.toBeNull()
+    expect(transcribe).toHaveBeenCalledTimes(1); expect(chatCompletion).toHaveBeenCalledTimes(1)
+  } finally { jest.mocked(Storage.setItem).mockImplementation(original) }
 })

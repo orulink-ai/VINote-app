@@ -1,6 +1,6 @@
 import Storage from '@react-native-async-storage/async-storage'
 import FS from 'react-native-fs'
-import { prepareClientNote, launchClientNote, readClientNote, retryClientNote } from '../src/lib/clientNotePipeline'
+import { prepareClientNote, recoverPreparedClientNote, launchClientNote, readClientNote, retryClientNote } from '../src/lib/clientNotePipeline'
 import { readAccountId } from '../src/lib/storage'
 import { integrationJson, verifyContentService } from '../src/lib/integration'
 import { transcribe } from '../src/lib/meetingCloud'
@@ -20,6 +20,8 @@ const draft: IntakeDraft = { mode: 'url', url: 'https://article.example/a', sour
 const extracted = { extraction_protocol: 1, title: '文章', text: '完整来源', source_sha256: 'a'.repeat(64), source_type: 'webpage' }
 beforeEach(async () => {
   jest.clearAllMocks()
+  const service = require('../src/lib/integration') as { operationId: jest.Mock }
+  service.operationId.mockReset().mockReturnValue('11111111-1111-4111-8111-111111111111')
   for (const key of await Storage.getAllKeys()) await Storage.removeItem(key)
   jest.mocked(readAccountId).mockResolvedValue('alice')
   jest.mocked(integrationJson).mockResolvedValue(extracted)
@@ -186,4 +188,37 @@ test('copied media with equal bytes cannot hide an unknown request behind a new 
   const copied = { ...legacyAudio, file: { ...legacyAudio.file, id: 'new-copy', uri: 'file:///documents/recordings/accounts/alice/new-copy.m4a' } }
   await expect(prepareClientNote('alice', copied)).rejects.toThrow('此来源有未确认')
   expect(chatCompletion).toHaveBeenCalledTimes(1)
+})
+
+test('fragment aliases cannot repeat a URL with an unknown model result', async () => {
+  const first = await prepareClientNote('alice', draft)
+  jest.mocked(chatCompletion).mockRejectedValueOnce(new Error('lost response'))
+  await launchClientNote('alice', first)
+  await expect(prepareClientNote('alice', { ...draft, url: draft.url + '#part' })).rejects.toThrow('此来源有未确认')
+  expect(chatCompletion).toHaveBeenCalledTimes(1)
+  expect(integrationJson).toHaveBeenCalledTimes(1)
+})
+test.each([false, true])('different URLs with equal extracted text block unknown replay even if source sha differs: %s', async differentHash => {
+  const first = await prepareClientNote('alice', draft)
+  jest.mocked(chatCompletion).mockRejectedValueOnce(new Error('lost response'))
+  await launchClientNote('alice', first)
+  const control = require('../src/lib/integration') as { operationId: jest.Mock }
+  control.operationId.mockReturnValueOnce('22222222-2222-4222-8222-222222222222')
+  if (differentHash) jest.mocked(integrationJson).mockResolvedValueOnce({ ...extracted, source_sha256: 'c'.repeat(64) })
+  const second = await prepareClientNote('alice', { ...draft, url: 'https://different.example/same-body' })
+  await launchClientNote('alice', second)
+  expect((await readClientNote('alice', second)).message).toContain('此正文有未确认')
+  expect(integrationJson).toHaveBeenCalledTimes(2)
+  expect(chatCompletion).toHaveBeenCalledTimes(1)
+})
+
+test('a client record with prior dispatch evidence cannot be laundered through pending recovery', async () => {
+  mockOriginal()
+  const receipt = await prepareClientNote('alice', legacyAudio)
+  const key = `vinote:alice:client-note:${receipt.operationId}`
+  const record = JSON.parse((await Storage.getItem(key))!)
+  record.status = 'running'; record.inFlight = 'asr'
+  await Storage.setItem(key, JSON.stringify(record))
+  await expect(recoverPreparedClientNote('alice', legacyAudio, receipt.operationId!)).rejects.toThrow('尚未派发')
+  expect(transcribe).not.toHaveBeenCalled(); expect(chatCompletion).not.toHaveBeenCalled()
 })

@@ -8,7 +8,7 @@ import type { LocalRecording } from '../features/recording/recordingLibrary'
 import { advanceLocalFileAssociation, beginLocalFileAssociation, markLocalFileDispatch, readLocalFileAssociation } from './localFileAssociations'
 import { isExplicitVideoUrl } from './intakeCapabilities'
 import { type ModelSelection } from './models'
-import { prepareClientNote, startClientNote, readClientNote } from './clientNotePipeline'
+import { prepareClientNote, recoverPreparedClientNote, startClientNote, readClientNote } from './clientNotePipeline'
 
 export type IntakeFile = LocalFile | LocalRecording
 export type IntakeDraft = { execution?: 'client'; modelOrigin?: string; modelSelection?: ModelSelection; retryUncertain?: boolean; modelConfirmationRequired?: boolean; mode: 'url' | 'file'; url: string; file?: IntakeFile; taskId?: string; sourceType?: string; uncertain?: boolean; operationId?: string; receiptState?: 'unknown' | 'reserved' | 'accepted'; recoverySupported?: boolean; generationOrigin?: string; submittedAt?: string }
@@ -81,7 +81,7 @@ export function intakeUrl(value: string) {
   if (!match) throw new Error('请粘贴完整的 http 或 https 网页或视频链接')
   const url = new URL(match[0])
   if (url.username || url.password) throw new Error('链接不能包含账号密码')
-  return url.href
+  return url.href.replace(/#.*$/, '')
 }
 const submissions = new Map<string, Promise<IntakeDraft>>()
 export async function submitIntake(owner: string, draft: IntakeDraft): Promise<IntakeDraft> {
@@ -108,16 +108,24 @@ async function submitSource(owner: string, draft: IntakeDraft): Promise<IntakeDr
     draft = { ...draft, sourceType: 'bilibiliSource' in draft.file && draft.file.bilibiliSource ? 'video' : intakeSourceType(draft.file) }
     const sourceOperation = 'bilibiliSource' in draft.file! ? draft.file!.bilibiliSource?.operationId : undefined
     if (sourceOperation) {
+      if (sourceOperation !== draft.file!.id || !/^[a-f0-9-]{36}$/i.test(sourceOperation)) throw new Error('原下载操作与文件身份不一致，未重新提交')
       const previous = await readLocalFileAssociation(owner, sourceOperation)
       if (previous) {
         const raw = await Storage.getItem(`vinote:${owner}:source-request:${sourceOperation}`)
         await guard(owner)
+        if (!raw && previous.execution === 'client' && previous.state === 'prepared' && previous.localFileId === draft.file!.id && previous.modelOrigin && previous.generationOrigin === generationBaseUrl) {
+          const prepared = await recoverPreparedClientNote(owner, draft, sourceOperation)
+          return acceptClientSource(owner, prepared)
+        }
         if (!raw) throw new Error('原来源已有处理关联，请保留原操作核验；不会创建另一任务')
         return recoverIntake(owner, JSON.parse(raw))
       }
     }
   }
   const receipt = await prepareClientNote(owner, draft)
+  return acceptClientSource(owner, receipt)
+}
+async function acceptClientSource(owner: string, receipt: IntakeDraft): Promise<IntakeDraft> {
   if (receipt.file && 'name' in receipt.file) await beginLocalFileAssociation(owner, receipt.file, receipt.operationId!, { execution: 'client', modelOrigin: receipt.modelOrigin! })
   await writeIntake(owner, receipt)
   await markLocalFileDispatch(owner, receipt.operationId!)
