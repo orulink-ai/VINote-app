@@ -18,6 +18,8 @@ function planAndroidCommand(mode) {
   if (!selected) throw new Error('Usage: node scripts/android-build.cjs test:debug|test:apk|vinote:debug|vinote:apk|bundle')
   return {
     ...selected,
+    requireGeneration: !selected.needsMetro,
+    requireIntegration: !selected.needsMetro,
     args: selected.needsMetro
       ? ['-PvinoteChannel=' + selected.channel]
       : [selected.task, ...(selected.standalone ? ['-PvinoteStandalone=true'] : []), '-PvinoteChannel=' + selected.channel],
@@ -27,7 +29,7 @@ function planAndroidCommand(mode) {
 function run(mode, extraArgs = []) {
   const plan = planAndroidCommand(mode)
   const deployment = selectDeployment(plan.channel)
-  validateDeployment(deployment, { requireGeneration: plan.task === 'assembleRelease' || plan.task === 'bundleRelease' })
+  validateDeployment(deployment, { requireGeneration: plan.requireGeneration, requireIntegration: plan.requireIntegration })
   let result
   if (plan.needsMetro) {
     const cli = path.join(__dirname, '../node_modules/@react-native-community/cli/build/bin.js')

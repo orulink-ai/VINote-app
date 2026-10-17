@@ -5,7 +5,8 @@ function publicHost(host) {
   return !isIP(host.replace(/^\[|\]$/g, '')) && host.includes('.') &&
     !/(^|\.)(localhost|local|internal|test|invalid|example|home\.arpa)$/.test(host)
 }
-function validateDeployment(config, { requireGeneration = false } = {}) {
+function validateDeployment(config, { requireGeneration = false, requireIntegration = false } = {}) {
+  if (requireIntegration && (typeof config.integrationBaseUrl !== 'string' || !config.integrationBaseUrl.trim() || config.integrationBaseUrl !== config.integrationBaseUrl.trim())) throw new Error('独立包必须显式配置 integrationBaseUrl 飞书集成服务')
   if (!['lan', 'public'].includes(config.channel)) throw new Error('未知部署通道')
   for (const key of ['apiBaseUrl', 'authBaseUrl', ...(config.integrationBaseUrl ? ['integrationBaseUrl'] : [])]) {
     const url = new URL(config[key])
@@ -22,10 +23,10 @@ function validateDeployment(config, { requireGeneration = false } = {}) {
 }
 module.exports = { validateDeployment }
 if (require.main === module) {
-  if (process.argv.includes('--require-generation')) {
+  if (process.argv.some(arg => ['--require-generation', '--require-integration', '--require-public'].includes(arg))) {
     const config = require('../config/deployment.json')
-    if (config.channel !== 'public') throw new Error('Release 必须选择 public 通道')
-    validateDeployment(config, { requireGeneration: true })
+    if (process.argv.includes('--require-public') && config.channel !== 'public') throw new Error('Release 必须选择 public 通道')
+    validateDeployment(config, { requireGeneration: process.argv.includes('--require-generation'), requireIntegration: process.argv.includes('--require-integration') })
   }
   validateDeployment(require('../config/deployment.test.json'))
   validateDeployment(require('../config/deployment.public.json'))

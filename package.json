@@ -1,6 +1,6 @@
 {
   "name": "VINoteApp",
-  "version": "0.2.0",
+  "version": "0.1.4",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
@@ -9,7 +9,7 @@
     "start": "react-native start",
     "test": "jest",
     "config:check": "node scripts/validate-deployment.cjs",
-    "config:check:release": "node scripts/validate-deployment.cjs --require-generation",
+    "config:check:release": "node scripts/validate-deployment.cjs --require-generation --require-integration --require-public",
     "preandroid": "npm run config:test",
     "preios": "npm run config:test",
     "typecheck": "tsc --noEmit",

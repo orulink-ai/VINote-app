@@ -63,3 +63,14 @@ The public VILab HTTPS origin is configured. The operator must still verify DNS,
 Use `npm run config:check`, `npm run test:scripts`, `npm test -- --runInBand` and `npm run typecheck` for configuration, script regressions, app tests and types. Native builds and device acceptance are separate checks. Background capture does not imply background generation. Do not commit APKs, audio, transcripts, tokens, private keys or private screenshots.
 
 The Gradle plugin also requires a discoverable JDK 17 toolchain. If installed but not detected, set org.gradle.java.installations.paths in the user-level ~/.gradle/gradle.properties to that installation; do not download a duplicate JDK. Review validated the standalone Gradle task graph and rejection of unsigned Release requests, not a newly produced APK or a production-signed package.
+
+
+## 0.1.4 standalone configuration / 独立包配置
+
+Android versionName / npm / iOS MARKETING_VERSION: **0.1.4**; Android versionCode: **9**; iOS CURRENT_PROJECT_VERSION: **5** (independent build sequence).
+
+内网独立 APK 为混合配置：模型直连接口为 `http://192.168.1.143:9876`，账号为公网 Supabase，`integrationBaseUrl` 与 `generationBaseUrl` 均为 `https://supabase-vinote.orulink.ai/vinote-api`。链接/上传笔记由公网内容后端执行，其模型服务地址由服务器配置；不会因 App 的 LAN 模型地址而转走 LAN。两侧所选模型 ID 必须兼容，失败不自动换模型。
+
+The LAN standalone APK combines direct LAN model access with public authentication, content processing and Feishu. Link/upload notes execute on the public content backend, whose model origin is configured server-side; this is not an all-LAN package. Public APKs use the public model origin too.
+
+All embedded APK/AAB entry points require explicit content and integration URLs before invoking native build commands, including direct Gradle `-PvinoteStandalone=true`. Release additionally requires the public channel and release signing. `npm run config:check:release` checks the public channel and both service URLs without building; signing credentials are checked by Gradle. Metro development retains its loopback content service. See [0.1.4](releases/0.1.4.md). 本次仅离线测试，未重新构建、安装或验收两包。

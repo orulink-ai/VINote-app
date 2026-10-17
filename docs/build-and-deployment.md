@@ -74,3 +74,14 @@ Gradle 插件还需要可发现的 JDK 17 工具链。若已安装但未被发�
 ## B站设备音频下载原生变更
 
 本轮MeetingFiles新增bilibiliDownloadProtocol=1及start/cancel/releaseBilibiliDownload，另有专用policy/downloader源码。需重建匹配AndroidAPK，不能仅替换JS。沿用public standalone缓存构建与兼容签名覆盖安装，保留com.vinoteapp.dev数据；iOS没有对应native路径。离线编译：python scripts/check-bilibili-native-offline.py，只用已有缓存，不调用Gradle/网络/模型。实际包构建及设备只下载验收由主线程负责，再决定是否进行新样本首次推理；不可重试旧receipt。
+
+
+## 0.1.4 standalone configuration / 独立包配置
+
+Android versionName / npm / iOS MARKETING_VERSION: **0.1.4**; Android versionCode: **9**; iOS CURRENT_PROJECT_VERSION: **5** (independent build sequence).
+
+内网独立 APK 为混合配置：模型直连接口为 `http://192.168.1.143:9876`，账号为公网 Supabase，`integrationBaseUrl` 与 `generationBaseUrl` 均为 `https://supabase-vinote.orulink.ai/vinote-api`。链接/上传笔记由公网内容后端执行，其模型服务地址由服务器配置；不会因 App 的 LAN 模型地址而转走 LAN。两侧所选模型 ID 必须兼容，失败不自动换模型。
+
+The LAN standalone APK combines direct LAN model access with public authentication, content processing and Feishu. Link/upload notes execute on the public content backend, whose model origin is configured server-side; this is not an all-LAN package. Public APKs use the public model origin too.
+
+All embedded APK/AAB entry points require explicit content and integration URLs before invoking native build commands, including direct Gradle `-PvinoteStandalone=true`. Release additionally requires the public channel and release signing. `npm run config:check:release` checks the public channel and both service URLs without building; signing credentials are checked by Gradle. Metro development retains its loopback content service. See [0.1.4](releases/0.1.4.md). 本次仅离线测试，未重新构建、安装或验收两包。
