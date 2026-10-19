@@ -82,3 +82,7 @@
 - 独立复核曾发现旧owner Intent迟到、executor shutdown返回、旧导出错误污染新选项三项风险；已修复可撤销预览ticket、拒绝执行捕获及file/owner/identity/route/selection epoch绑定，独立源码复核通过。Jest221项、TypeScript与实际SDK classpath手动编译通过，新增JVM生命周期反例通过。
 - 显式Android DEBUG候选工作流不使用Secrets或生产签名，基于公开配置/公共debug签名构建并上传验收制品；不会在push/synchronize上自动反复构建。当前尚无本分支APK，未安装/真机/发布，不能宣称脱USB与WebM完整seek通过。
 - 再次fetch确认origin/main为f57c4369cc555cfcc9085f7cc9cc85fc3986fa4f，分支基点一致。拟提交和推送后创建中文草稿PR到main，内容质量及原生实机门槛未满足前不merge、不修改父gitlink。所有旧内容/原件/ASR保留；本轮无推理调用。
+
+### 候选CI首次反馈与追加修复
+
+提交7bf9883已推送，中文草稿PR #13目标main。GitHub运行39293209761在编译前拒绝workflow：job级env不允许runner上下文，具体为GRADLE_USER_HOME中的runner.temp；并非Android源码/模型错误。改为该临时runner的github.workspace/.candidate-gradle，保留独立缓存目录，追加修复提交。普通离线CI独立运行；尚未宣称候选构建成功。静态YAML检查不覆盖GitHub上下文语义，此失败记录保留。

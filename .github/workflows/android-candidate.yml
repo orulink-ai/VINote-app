@@ -35,7 +35,7 @@ jobs:
     env:
       CI: 'true'
       NODE_OPTIONS: --max-old-space-size=384
-      GRADLE_USER_HOME: ${{ runner.temp }}/android-candidate-gradle
+      GRADLE_USER_HOME: ${{ github.workspace }}/.candidate-gradle
       CMAKE_BUILD_PARALLEL_LEVEL: '1'
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
