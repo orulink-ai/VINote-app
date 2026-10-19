@@ -86,3 +86,5 @@
 ### 候选CI首次反馈与追加修复
 
 提交7bf9883已推送，中文草稿PR #13目标main。GitHub运行39293209761在编译前拒绝workflow：job级env不允许runner上下文，具体为GRADLE_USER_HOME中的runner.temp；并非Android源码/模型错误。改为该临时runner的github.workspace/.candidate-gradle，保留独立缓存目录，追加修复提交。普通离线CI独立运行；尚未宣称候选构建成功。静态YAML检查不覆盖GitHub上下文语义，此失败记录保留。
+
+运行39293608691已进入真实runner，但SDK准备失败：setup-android的默认packages包含已不存在的`tools`，sdkmanager明确返回`Failed to find package 'tools'`。显式仅准备`platform-tools`，后续SDK/NDK/CMake仍按工程已选版本安装；关闭无关许可证全文日志。此前失败在源码编译前，未调用模型，未产生APK。
