@@ -11,6 +11,10 @@
 遵循当前项目的编程与 TDD 要求，不编造测试结果；不适用 TDD 时说明原因及替代验证。档案工作流不构成自动提交、推送或合入授权。
 <!-- agent-dev-journal:end -->
 
+## 2026-10-20 原件保存与生成确认
+
+`originalMedia.ts` / `MeetingFiles.originalMediaProtocol=1` 为账号绑定本机原件提供系统保存选择器和完整视频原生预览/seek；禁止远端 URI、JS/base64 全文件复制，取消不报成功。Android 64 KiB 复制，iOS exporting/asCopy；播放器关闭/后台释放，格式不支持明确提示导出。旧包需重建，不能用 Metro 声称已更新。新 note intake 经 `IntakeGenerationConfirmation` 确认本次冻结模型，不改默认模型，不重放 unknown；录音 summary-only 完整证据合同保持。会议视频原件不冒充已接入录音生成流水线。详见 `docs/original-media-ux.md`，未做本分支原生构建/真机/签名发布。
+
 ## 飞书与会议详情
 
 `src/lib/feishu.ts` 仅使用经校验的云账号 token 请求管理员配置的 integrationBaseUrl，不使用 VILab Origin 代替集成服务。密钥与飞书刷新 token 不进入客户端。自动交付 outbox 按账号隔离，删除纪要清除该纪要待提交快照。生成成功后交付错误不得改变纪要/原录音状态。手机详情不得伪造逐句说话人与时间，分钟分段只是实际转写分段起点。编辑历史存 note-history 前缀，不能混入 note 列表或改变生成版本号。

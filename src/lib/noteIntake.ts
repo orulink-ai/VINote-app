@@ -84,15 +84,15 @@ export function intakeUrl(value: string) {
   return url.href.replace(/#.*$/, '')
 }
 const submissions = new Map<string, Promise<IntakeDraft>>()
-export async function submitIntake(owner: string, draft: IntakeDraft): Promise<IntakeDraft> {
+export async function submitIntake(owner: string, draft: IntakeDraft, confirmedModels?: ModelSelection): Promise<IntakeDraft> {
   await guard(owner)
   const active = submissions.get(owner)
   if (active) return active
-  const work = submitSource(owner, draft).finally(() => submissions.delete(owner))
+  const work = submitSource(owner, draft, confirmedModels).finally(() => submissions.delete(owner))
   submissions.set(owner, work)
   return work
 }
-async function submitSource(owner: string, draft: IntakeDraft): Promise<IntakeDraft> {
+async function submitSource(owner: string, draft: IntakeDraft, confirmedModels?: ModelSelection): Promise<IntakeDraft> {
   await guard(owner)
   const stored = await readIntake(owner)
   // A stale screen cannot replace a durable request or change its input/options.
@@ -115,6 +115,7 @@ async function submitSource(owner: string, draft: IntakeDraft): Promise<IntakeDr
         await guard(owner)
         if (!raw && previous.execution === 'client' && previous.state === 'prepared' && previous.localFileId === draft.file!.id && previous.modelOrigin && previous.generationOrigin === generationBaseUrl) {
           const prepared = await recoverPreparedClientNote(owner, draft, sourceOperation)
+          if (confirmedModels && (prepared.modelSelection?.asr_model !== confirmedModels.asr_model || prepared.modelSelection?.llm_model !== confirmedModels.llm_model)) throw new Error('原准备操作模型不同，请核验原操作；未替换已保存模型')
           return acceptClientSource(owner, prepared)
         }
         if (!raw) throw new Error('原来源已有处理关联，请保留原操作核验；不会创建另一任务')
@@ -122,7 +123,7 @@ async function submitSource(owner: string, draft: IntakeDraft): Promise<IntakeDr
       }
     }
   }
-  const receipt = await prepareClientNote(owner, draft)
+  const receipt = await prepareClientNote(owner, draft, confirmedModels)
   return acceptClientSource(owner, receipt)
 }
 async function acceptClientSource(owner: string, receipt: IntakeDraft): Promise<IntakeDraft> {

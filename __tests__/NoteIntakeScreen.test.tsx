@@ -11,6 +11,9 @@ import { readAccountId } from '../src/lib/storage'
 
 jest.mock('../src/lib/bilibiliDownload', () => ({ deviceBilibiliAvailable: jest.fn(() => false), downloadBilibiliAudio: jest.fn() }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
+jest.mock('../src/lib/models', () => ({ loadModels: jest.fn(async () => [
+  { id: 'asr', modelType: 'asr', runtimeStatus: 'available' }, { id: 'llm', modelType: 'llm', runtimeStatus: 'available' },
+]), loadSelection: jest.fn(async () => ({ asr_model: 'asr', llm_model: 'llm' })) }))
 jest.mock('../src/lib/localFiles', () => ({ importLocalFile: jest.fn(), verifyLocalFile: jest.fn(async () => {}) }))
 jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://source.invalid', verifyContentService: jest.fn(async () => ({ content_service_protocol: 1, generation: true, sync: false, max_upload_bytes: 134217728, video_url: true })), integrationJson: jest.fn() }))
 jest.mock('../src/lib/noteIntake', () => ({ assertIntakeOrigin: jest.fn(), readIntake: jest.fn(), recoverIntake: jest.fn(), submitIntake: jest.fn(), inspectIntake: jest.fn(), leaveClientIntake: jest.fn(async () => {}), leaveReservedIntake: jest.fn(async () => {}), writeIntake: jest.fn(async () => {}), intakeFileName: jest.fn(), intakeSourceType: jest.fn(), intakeUrl: jest.fn((url: string) => url) }))
@@ -41,6 +44,34 @@ beforeEach(() => {
 function press(view: Renderer.ReactTestRenderer, title: string) {
   return view.root.findAll(node => node.props.title === title && typeof node.props.onPress === 'function')[0].props.onPress()
 }
+
+test('new generation confirmation cancellation never creates or submits an operation', async () => {
+  jest.mocked(readIntake).mockResolvedValue({ mode: 'url', url: 'https://python.org/about' })
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+  await act(async () => { press(view, '生成总结笔记') })
+  expect(submitIntake).not.toHaveBeenCalled()
+  await act(async () => { press(view, '取消') })
+  expect(submitIntake).not.toHaveBeenCalled(); expect(integrationJson).not.toHaveBeenCalled()
+  await act(async () => view.unmount())
+})
+
+test('one confirmed submission with an unknown receipt remains query-only on the next click', async () => {
+  jest.mocked(readIntake).mockResolvedValue({ mode: 'url', url: 'https://python.org/about' })
+  jest.mocked(submitIntake).mockImplementationOnce(async () => {
+    await writeIntake('owner', pending)
+    throw new Error('结果尚未确认')
+  })
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<NoteIntakeScreen onBack={jest.fn()} onSaved={jest.fn()} />) })
+  await act(async () => { press(view, '生成总结笔记') })
+  await act(async () => { press(view, '确认模型并开始生成') })
+  expect(submitIntake).toHaveBeenCalledTimes(1)
+  await act(async () => { press(view, '核验原提交') })
+  expect(recoverIntake).toHaveBeenCalledWith('owner', pending)
+  expect(submitIntake).toHaveBeenCalledTimes(1)
+  await act(async () => view.unmount())
+})
 test('unknown reentry reads its original operation; reserved never submits or retries', async () => {
   jest.mocked(recoverIntake).mockResolvedValue({ ...accepted, uncertain: true, receiptState: 'reserved' })
   let view!: Renderer.ReactTestRenderer
@@ -257,8 +288,10 @@ test('Android primary reads Bilibili on device even with remote video disabled, 
   expect(view.root.findAll(node => node.props.title === '读取B站内容')).toHaveLength(0)
   jest.mocked(submitIntake).mockResolvedValueOnce({ ...accepted, mode: 'file', url: '', file })
   await act(async () => { await press(view, '生成总结笔记') })
+  expect(submitIntake).not.toHaveBeenCalled()
+  await act(async () => { await press(view, '确认模型并开始生成') })
   expect(submitIntake).toHaveBeenCalledTimes(1)
-  expect(submitIntake).toHaveBeenCalledWith('owner', { mode: 'file', url: '', file })
+  expect(submitIntake).toHaveBeenCalledWith('owner', { mode: 'file', url: '', file }, { asr_model: 'asr', llm_model: 'llm' })
   expect(integrationJson).not.toHaveBeenCalled()
   await act(async () => view.unmount()); alert.mockRestore()
 })

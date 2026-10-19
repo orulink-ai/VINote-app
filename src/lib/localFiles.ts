@@ -1,6 +1,6 @@
 import { identityEpoch } from './sessionIdentity'
 import FS from 'react-native-fs'
-import Share from 'react-native-share'
+import { exportOriginal } from './originalMedia'
 import { NativeModules } from 'react-native'
 import { readAccountId } from './storage'
 import { operationId } from './integration'
@@ -159,9 +159,7 @@ export async function deleteLocalFile(file: LocalFile, expectedOwner?: string, e
   }
 }
 export async function exportLocalFile(file: LocalFile) {
-  const { path } = await directory(); valid(file, path)
-  if (!await FS.exists(file.uri)) throw new Error('文件在当前设备不可用')
-  await Share.open({ url: file.uri, title: file.name, failOnCancel: false, saveToFiles: true })
+  return exportOriginal(file)
 }
 export async function readTextFile(file: LocalFile) {
   const { path } = await directory(); valid(file, path)

@@ -85,12 +85,12 @@ async function fileIdentity(owner: string, draft: IntakeDraft): Promise<Fingerpr
   await ownerGuard(owner)
   return { uri: file.uri, size, sha256 }
 }
-export async function prepareClientNote(owner: string, draft: IntakeDraft): Promise<IntakeDraft> {
+export async function prepareClientNote(owner: string, draft: IntakeDraft, confirmedModels?: ModelSelection): Promise<IntakeDraft> {
   await ownerGuard(owner)
   const epoch = identityEpoch()
   if (draft.mode === 'url') draft = { ...draft, url: canonicalSourceUrl(draft.url) }
   if (draft.operationId || draft.taskId || draft.uncertain) throw new Error('原操作必须先核验，不能重新提交')
-  const models = { ...await loadSelection() }
+  const models = { ...(confirmedModels || await loadSelection()) }
   const catalog = await loadModels(true)
   const media = ['audio', 'video'].includes(draft.sourceType || '')
   for (const kind of (media ? ['asr', 'llm'] : ['llm']) as ('asr' | 'llm')[]) {
@@ -110,6 +110,7 @@ export async function prepareClientNote(owner: string, draft: IntakeDraft): Prom
     const sameContent = source.sha256 && previous.source.sha256 === source.sha256 && previous.source.size === source.size
     if ((sameUrl || sameContent || JSON.stringify(previous.source) === JSON.stringify(source)) && (previous.inFlight || previous.transcription?.version === 5 && previous.transcription.inFlight || previous.status === 'unknown')) throw new Error('此来源有未确认的模型请求，不能另建操作重复发送')
     if (JSON.stringify(previous.source) === JSON.stringify(source) && previous.status === 'pending') {
+      if (confirmedModels && JSON.stringify(previous.models) !== JSON.stringify(models)) throw new Error('原准备操作模型不同，请核验原操作；未替换已保存模型')
       await ownerGuard(owner)
       validate(previous, owner, previous.draft)
       return previous.draft // Only an explicit submit may finish this pre-dispatch storage transaction.

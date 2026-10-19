@@ -55,3 +55,7 @@
 - 此轮修复后新增/补强回归，未伪称全部先写测试；Red来源为用户转述Darwin对d9的复现。旧“不同来源”fixture原本给了相同正文/hash，已改为确实不同正文，保留独立相同正文别名反例。
 - 最终本地定向：16 suites / 296 tests passed，Node384单worker、全程offline guard；包括14套件218及apiAccount/sessionGate两套件78。TypeScript通过，diff按既有CRLF规则通过。
 - 新传输错误边界未改HTTP刷新/服务地址/Token存储；类型保留原账号错误code。没有真实网络模型调用、原生构建或修改其他checkout。最终CI以本追加提交为准，仍等待独立复审，不合并。
+
+## 后续变更
+
+2026-10-20｜补充：[App会议原件与生成确认](../../2026-10-20/2026-10-20_002225_wugui_无Issue_App会议原件与生成确认/index.md) 为新 intake 增加本次模型显式确认并冻结，不改本档固定 Origin/unknown 不重放合同；原件保存和视频预览为独立本机能力。仅源码/离线，未发布。

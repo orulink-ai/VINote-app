@@ -1,7 +1,7 @@
 import React from 'react'
 import Renderer, { act } from 'react-test-renderer'
 import { FileLibraryScreen } from '../src/screens/FileLibraryScreen'
-import { listLocalFileLinks, listLocalFiles, importLocalFile, setLocalFilePurpose, deleteLocalFile } from '../src/lib/localFiles'
+import { listLocalFileLinks, listLocalFiles, importLocalFile, setLocalFilePurpose, deleteLocalFile, exportLocalFile } from '../src/lib/localFiles'
 import { listRecordings } from '../src/features/recording/recordingLibrary'
 import { readAccountId } from '../src/lib/storage'
 import { noteSourceFiles } from '../src/lib/noteSourceFiles'
@@ -14,7 +14,34 @@ jest.mock('../src/lib/localFiles', () => ({ listLocalFiles: jest.fn(), listLocal
 jest.mock('../src/lib/notes', () => ({ createTextNote: jest.fn() }))
 jest.mock('../src/lib/noteSourceFiles', () => ({ noteSourceFiles: jest.fn() }))
 const file = { id: '11111111-1111-4111-8111-111111111111', uri: 'file:///documents/files/accounts/owner/11111111-1111-4111-8111-111111111111.docx', name: 'source.docx', size: 123, category: 'file' as const, purpose: 'note' as const, extension: 'docx', createdAt: '2026-10-12' }
+
+test.each(['saved', 'cancelled'] as const)('file export reports %s without changing original associations', async result => {
+  jest.mocked(exportLocalFile).mockResolvedValueOnce(result)
+  const view = await mount()
+  await act(async () => { press(view, '打开文件 source.docx') })
+  await act(async () => { await press(view, '导出文件') })
+  expect(hostText(view)).toContain(result === 'saved' ? '原文件已保存到所选位置' : '已取消保存，原文件保留')
+  expect(deleteLocalFile).not.toHaveBeenCalled()
+  expect(createTextNote).not.toHaveBeenCalled()
+})
 const association = { owner: 'owner', localFileId: file.id, operationId: '22222222-2222-4222-8222-222222222222', generationOrigin: 'http://127.0.0.1:8900', taskId: '33333333-3333-4333-8333-333333333333', noteId: 'source-33333333-3333-4333-8333-333333333333', state: 'saved' as const }
+test.each(['failed', 'saved', 'cancelled'] as const)('a late %s export cannot appear after switching files and reopening the same file', async outcome => {
+  const second = { ...file, id: '44444444-4444-4444-8444-444444444444', name: 'second.docx' }
+  jest.mocked(listLocalFiles).mockResolvedValue([file, second])
+  let reject!: (error: Error) => void
+  let resolve!: (result: 'saved' | 'cancelled') => void
+  jest.mocked(exportLocalFile).mockImplementationOnce(() => new Promise((done, fail) => { reject = fail; resolve = done }))
+  const view = await mount()
+  await act(async () => { press(view, '打开文件 source.docx') })
+  let pending: unknown
+  act(() => { pending = press(view, '导出文件') })
+  await act(async () => { press(view, '打开文件 second.docx') })
+  await act(async () => { press(view, '打开文件 source.docx') })
+  await act(async () => { if (outcome === 'failed') reject(new Error('OLD_EXPORT_FAILURE')); else resolve(outcome); await pending })
+  expect(hostText(view)).not.toContain('OLD_EXPORT_FAILURE')
+  expect(hostText(view)).not.toContain('原文件已保存到所选位置')
+  expect(hostText(view)).not.toContain('已取消保存，原文件保留')
+})
 const views: Renderer.ReactTestRenderer[] = []
 const hostText = (view: Renderer.ReactTestRenderer) => view.root
   .findAll(node => typeof node.type === 'string')

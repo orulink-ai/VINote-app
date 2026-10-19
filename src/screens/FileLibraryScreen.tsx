@@ -16,6 +16,7 @@ import { readAccountId } from '../lib/storage'
 import { formatDuration } from '../lib/formatDuration'
 import { noteSourceFiles } from '../lib/noteSourceFiles'
 import type { Note } from '../types/api'
+import { previewOriginal, closeOriginalPreview } from '../lib/originalMedia'
 
 type Row = { id: string; title: string; category: string; purpose?: FilePurpose; date: string; record?: LocalRecording; file?: LocalFile }
 const fileSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1073741824 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1073741824).toFixed(1)} GB`
@@ -29,8 +30,12 @@ export function FileLibraryScreen({ onRecording, onOpenNote, onSummarize, view, 
   const [purpose, setPurpose] = useState<FilePurpose>(view?.purpose || 'meeting'), [unassigned, setUnassigned] = useState(!!view?.unassigned)
   const [selected, setSelected] = useState<LocalFile | null>(null), [error, setError] = useState(''), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false)
   const [links, setLinks] = useState<LocalFileLink[]>([]), [linksError, setLinksError] = useState(''), [linksLoading, setLinksLoading] = useState(false)
+  const [fileFeedback, setFileFeedback] = useState('')
   const owner = useRef(''), selectedRef = useRef(selected)
+  const selectionEpoch = useRef(0)
+  if (selectedRef.current?.id !== selected?.id) selectionEpoch.current++
   selectedRef.current = selected
+  useEffect(() => { setFileFeedback(''); setError(''); return closeOriginalPreview }, [selected?.id])
   const epoch = useRef(0)
   const mounted = useRef(true), confirmation = useRef(0), operationLock = useRef(false)
   const route = sourceNote ? `source:${sourceNote.id}` : 'library'
@@ -39,7 +44,7 @@ export function FileLibraryScreen({ onRecording, onOpenNote, onSummarize, view, 
   const restoreFocus = useRef<null | (() => boolean)>(null)
   useEffect(() => {
     mounted.current = true
-    const remove = subscribeIdentity(() => { confirmation.current++; restoreFocus.current = null; epoch.current++; setSelected(null); setRows([]) })
+    const remove = subscribeIdentity(() => { confirmation.current++; restoreFocus.current = null; epoch.current++; setSelected(null); setRows([]); setBusy(false); setError('') })
     return () => { mounted.current = false; confirmation.current++; restoreFocus.current = null; remove() }
   }, [])
   useEffect(() => { confirmation.current++; restoreFocus.current = null; setSelected(null) }, [route])
@@ -72,7 +77,15 @@ export function FileLibraryScreen({ onRecording, onOpenNote, onSummarize, view, 
     }).catch(cause => { if (active) setLinksError(cause instanceof Error ? cause.message : '原件关联读取失败') }).finally(() => { if (active) setLinksLoading(false) })
     return () => { active = false }
   }, [selected])
-  const perform = async (action: () => Promise<unknown>) => { if (busy) return; setBusy(true); setError(''); try { await action() } catch (cause) { setError(cause instanceof Error ? cause.message : '操作未完成，请重试') } finally { setBusy(false) } }
+  const perform = async (action: () => Promise<unknown>) => {
+    if (busy || operationLock.current) return
+    const identity = identityEpoch(), account = owner.current, parent = routeRef.current, selection = selectionEpoch.current
+    const current = () => mounted.current && identityEpoch() === identity && owner.current === account && routeRef.current === parent
+    operationLock.current = true; setBusy(true); setError('')
+    try { await action() }
+    catch (cause) { if (current() && selection === selectionEpoch.current) setError(cause instanceof Error ? cause.message : '操作未完成，请重试') }
+    finally { operationLock.current = false; if (current()) setBusy(false) }
+  }
   const remove = (file: LocalFile) => {
     if (!mounted.current || operationLock.current || busy || selectedRef.current?.id !== file.id || !owner.current) return
     const sequence = ++confirmation.current, account = owner.current, identity = identityEpoch(), parent = route
@@ -141,7 +154,21 @@ export function FileLibraryScreen({ onRecording, onOpenNote, onSummarize, view, 
         {!sourceNote && selected.purpose === 'note' && <View style={{ gap: 10, paddingVertical: 12, borderTopWidth: 1, borderColor: colors.line }}><Text style={styles.label}>整理为笔记</Text>{onSummarize && <PrimaryButton secondary={links.some(link => !!link.noteId)} title={links.some(link => !!link.noteId) ? '再生成一份笔记' : '生成总结笔记'} disabled={busy} onPress={() => { const file = selected; setSelected(null); onSummarize(file) }} />}<Text style={styles.subtitle}>先核对所选文件，点击生成才提交处理。原文件保留。</Text>
         {['md', 'txt', 'srt', 'vtt'].includes(selected.extension) && <PrimaryButton secondary title="保存原文为笔记" loading={busy} onPress={() => void perform(async () => { const content = await readTextFile(selected); const note = await createTextNote(selected.name.replace(/\.[^.]+$/, ''), content, `file-${selected.id}`); setSelected(null); onOpenNote(note.id) })} />}</View>}
         {!sourceNote && selected.purpose === 'meeting' && <Text style={styles.subtitle}>会议资料已保留。此文件当前可导出或删除；音频纪要从录音详情生成。</Text>}
-        <View style={{ gap: 10, paddingTop: 12, borderTopWidth: 1, borderColor: colors.line }}><Text style={styles.label}>文件操作</Text><PrimaryButton secondary title="导出文件" loading={busy} onPress={() => void perform(() => exportLocalFile(selected))} /><PrimaryButton tertiary title="删除原始文件" disabled={busy} onPress={() => remove(selected)} /></View><AsyncState error={error} /></>}
+        <View style={{ gap: 10, paddingTop: 12, borderTopWidth: 1, borderColor: colors.line }}><Text style={styles.label}>文件操作</Text>
+          {selected.category === 'video' && <><PrimaryButton secondary title="播放完整原视频" disabled={busy} onPress={() => void perform(() => previewOriginal(selected))} /><Text style={styles.subtitle}>打开系统播放器，可拖动进度查看原视频。格式支持取决于设备，原件不转换。</Text></>}
+          <PrimaryButton secondary title="导出文件" loading={busy} onPress={() => {
+            const file = selected, account = owner.current, identity = identityEpoch(), selection = selectionEpoch.current, parent = routeRef.current
+            const current = () => mounted.current && identityEpoch() === identity && account === owner.current && routeRef.current === parent && selectionEpoch.current === selection && selectedRef.current?.id === file.id
+            setFileFeedback('请选择保存位置，原文件保留。')
+            void perform(async () => {
+              try {
+                const result = await exportLocalFile(file)
+                if (current()) setFileFeedback(result === 'saved' ? '原文件已保存到所选位置。' : '已取消保存，原文件保留。')
+              } catch (cause) { if (current()) setFileFeedback(''); throw cause }
+            })
+          }} />
+          {!!fileFeedback && <Text accessibilityRole="alert" style={styles.subtitle}>{fileFeedback}</Text>}
+          <PrimaryButton tertiary title="删除原始文件" disabled={busy} onPress={() => remove(selected)} /></View><AsyncState error={error} /></>}
     </BottomActionSheet>
   </View>
 }

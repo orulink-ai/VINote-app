@@ -36,6 +36,28 @@ test('new operations freeze LAN origin and never send model IDs to extraction', 
   expect(chatCompletion).toHaveBeenCalledWith('same-llm', expect.any(Array), 'alice')
   expect((await readClientNote('alice', receipt)).result?.markdown).toBe('# 笔记')
 })
+
+test('explicit task models survive changed global selection without writing defaults or calling inference', async () => {
+  const models = { asr_model: 'same-asr', llm_model: 'explicit-llm' }
+  jest.mocked(loadModels).mockResolvedValueOnce([
+    { id: 'same-asr', modelType: 'asr', runtimeStatus: 'available' },
+    { id: 'explicit-llm', modelType: 'llm', runtimeStatus: 'available' },
+  ])
+  const receipt = await prepareClientNote('alice', draft, models)
+  expect(receipt.modelSelection).toEqual(models)
+  expect(chatCompletion).not.toHaveBeenCalled(); expect(transcribe).not.toHaveBeenCalled()
+  expect(Storage.setItem).not.toHaveBeenCalledWith('vinote:alice:models', expect.anything())
+})
+
+test('a pending source keeps its original models instead of silently replacing the confirmed pair', async () => {
+  const receipt = await prepareClientNote('alice', draft)
+  jest.mocked(loadModels).mockResolvedValueOnce([
+    { id: 'other', modelType: 'llm', runtimeStatus: 'available' },
+  ])
+  await expect(prepareClientNote('alice', draft, { asr_model: 'same-asr', llm_model: 'other' })).rejects.toThrow('原准备操作模型不同')
+  expect((await readClientNote('alice', receipt)).models.llm_model).toBe('same-llm')
+  expect(chatCompletion).not.toHaveBeenCalled(); expect(transcribe).not.toHaveBeenCalled()
+})
 test('transport ambiguity is durable and explicit retry cannot replay', async () => {
   jest.mocked(chatCompletion).mockRejectedValueOnce(new Error('connection lost'))
   const receipt = await prepareClientNote('alice', draft)
