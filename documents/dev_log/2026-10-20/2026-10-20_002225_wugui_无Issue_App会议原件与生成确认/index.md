@@ -116,6 +116,17 @@
 - Screen保存/取消文案独立于phase；action finally清phase与working，reload不清掉本次有效结果。锁在实际action内生效，重复点击不再改phase或提交两次。录音详情epoch＋owner identity epoch＋id/URI绑定反馈，切走再回到同录音、账号ABA、卸载均丢弃迟到结果，旧详情错误也不污染新详情。
 - 聚焦7 suites/52 tests通过；加入前述audio-only/模型确认/summary-only/B站回归后最终22 suites/276 tests通过，TypeScript及diff检查通过。最新改动只有TS/测试/文档，不需要额外原生接口。视频收缩与workflow/版本/签名配置保持；无云端/ASR/LLM、无设备操作、未提交，再次冻结交父代理审查。
 
+### 真实设备导出P1：仅归一化可信Context根别名
+
+- 主线程在已安装eace563上通过真实JDWP定位`OriginalMediaKt.originalMedia:16`：SOURCE_PATH_CANONICAL_EQUAL=false，REGULAR=true，BYTES=22266052。主线程报告源hash稳定、DocumentsUI可解析、MainActivity resumed；因此不是缺文件、大小或SAF支持问题。本代理未操作设备或重复JDWP。
+- `OriginalPathPolicy.requireFile`只规范化可信`Context.filesDir`根。输入字面路径必须精确等于该根或其canonical根下的`files|recordings/accounts/<encoded owner>/<validated filename>`；实际canonical文件必须等于由规范根拼出的预期路径。预期后代路径绝不再canonicalize，避免把owner/file symlink“合法化”。文件类型/大小、URI限制、音频文档allowlist仍保留，读取使用规范后的同一原文件；不改原件、SAF、权限或模型。
+- `OriginalPathPolicyTest`使用真实`Files.createSymbolicLink`，不mock、不跳过：复现旧三条件中仅路径相等失败，随后验证根别名/规范路径、文档和编码owner四个合法用例；13个拒绝反例含错误owner、traversal、非法owner段、越界、owner链接、文件内外链接、根下目录链接、非可信根别名、空/缺失/非文件。源字节未改。
+- 单独Javac编译该helper/test后运行`java -Xmx64m -cp artifacts/native-path-classes com.vinoteapp.OriginalPathPolicyTest artifacts/native-path-classes`通过。更新后的Android源以真实Android36/RN0.87.1/Kotlin2.2.0 SDK classpath独立编译exit0；executor/类型门禁及复制6项JVM反例通过；recordingExport、RecordingsScreen.export、originalMedia共3 suites/27 tests通过，diff检查通过。没有编整包/安装/ASR/LLM/云调用；需父代理审查后CI候选与真机复验，未提交。A r2私有正文SHA仍为180fcb2dafb2042b3ef5dee31c0566e1066de499a31b93222bf6aa5f1bd97a55，未改。
+
+- 提交前按主审要求将路径测试文件名替换为纯合成`meeting-001.m4a`，不携带真实录音标识或用户路径。JDWP三条件记录为：字面/规范路径相等=false、普通文件=true、大小有效=true；主线程同时核验源大小及SHA稳定，原件完整未变。设备证据由主线程取得，不归为本代理实测。
+- 替换合成标识后重新验证：Windows真实Files symlink测试4合法/13拒绝通过且没有skip，executor/文件策略及复制6项通过；Android独立原生编译exit0；22 suites/276 tests与TypeScript重新通过。本机JBR21以`--release 17`编译纯Java边界，未声称本机运行时为JDK17。
+- 原offline CI只有Node/TypeScript/Jest，未运行该JVM反例。按用户明确授权最小加入setup-java Temurin17及单个javac/java步骤，直接编译生产OriginalPathPolicy和真实symlink测试，无Android SDK、模型、Gradle、凭据或推理依赖，不skip链接。现有PR/push-main触发与权限保持；candidate workflow/版本/签名均未改。此处记录的是已接入源码，CI实际结果待父代理审查提交后验证；未自行触发CI或提交。
+
 ### 2026-10-20 09:33 Asia/Shanghai｜wugui / Codex 提交前复核
 
 - 主线程实际复跑22 suites/276 tests，全部通过；TypeScript通过。独立只读审查未发现本写集未解决P1/P2，允许提交功能分支并重建候选，仍不等于实机验收或正式发布。

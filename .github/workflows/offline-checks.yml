@@ -25,6 +25,19 @@ jobs:
         run: npm run config:check
       - name: Offline script tests
         run: node --require ./scripts/offline-network.cjs --test scripts/*.test.cjs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Original path policy (real filesystem symlinks, no Android SDK)
+        shell: bash
+        run: |
+          path_test_classes="$RUNNER_TEMP/original-path-test"
+          mkdir -p "$path_test_classes"
+          javac -J-Xmx128m --release 17 -d "$path_test_classes" \
+            android/app/src/main/java/com/vinoteapp/OriginalPathPolicy.java \
+            scripts/native-tests/OriginalPathPolicyTest.java
+          java -Xmx64m -cp "$path_test_classes" com.vinoteapp.OriginalPathPolicyTest "$path_test_classes"
       - name: TypeScript
         run: node --max-old-space-size=256 node_modules/typescript/bin/tsc --noEmit
       - name: Offline Jest (one worker)
