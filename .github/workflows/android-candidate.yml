@@ -1,0 +1,134 @@
+name: Android DEBUG acceptance candidate (explicit only)
+
+# A brand-new dispatch workflow must first be registered on the default branch.
+# Bootstrap only via an explicitly labeled same-repository PR changing this file;
+# opened/synchronize/push events never build a candidate automatically.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_candidate:
+        description: Build one arm64 standalone public-channel DEBUG candidate; no install or release
+        required: true
+        type: boolean
+        default: false
+  pull_request:
+    types: [labeled]
+    branches: [main]
+    paths: ['.github/workflows/android-candidate.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-candidate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.confirm_candidate) ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'android-candidate' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       startsWith(github.event.pull_request.head.ref, 'codex/'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      NODE_OPTIONS: --max-old-space-size=384
+      GRADLE_USER_HOME: ${{ github.workspace }}/.candidate-gradle
+      CMAKE_BUILD_PARALLEL_LEVEL: '1'
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+
+      - name: Prepare Android SDK and selected toolchain
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
+          # The source checkout requests a Java 21 daemon. Pin this ephemeral
+          # runner checkout to 17 too; changing JAVA_HOME alone does not do so.
+          printf 'toolchainVersion=17\n' > android/gradle/gradle-daemon-jvm.properties
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Select and validate public configuration (no service calls)
+        run: |
+          npm run config:public
+          npm run config:check:release
+
+      - name: Prepare actual speaker assets with existing SHA-256 verification
+        run: node scripts/prepare-speaker-models.cjs
+
+      - name: Assemble standalone arm64 DEBUG acceptance APK (not a production release)
+        working-directory: android
+        run: |
+          # One Gradle worker, in-process Kotlin, no production signing secrets.
+          # Heap budgets are not a whole-process-tree RSS limit. Record the
+          # first real run's time/maximum process RSS; do not invent measurements.
+          /usr/bin/time -v bash ./gradlew :app:assembleDebug \
+            -PvinoteStandalone=true -PvinoteChannel=public \
+            -PreactNativeArchitectures=arm64-v8a \
+            --no-daemon --max-workers=1 --console=plain --stacktrace \
+            -Dorg.gradle.parallel=false \
+            '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=384m -XX:ReservedCodeCacheSize=128m' \
+            -Pkotlin.compiler.execution.strategy=in-process
+
+      - name: Verify standalone JS, speaker bytes, ABI and debug application
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          import zipfile
+          apk = Path('android/app/build/outputs/apk/debug/app-debug.apk')
+          with zipfile.ZipFile(apk) as archive:
+              names = set(archive.namelist())
+              assert archive.getinfo('assets/index.android.bundle').file_size > 0, 'Missing bundled JS'
+              abis = {name.split('/')[1] for name in names if name.startswith('lib/') and name.endswith('.so')}
+              assert abis == {'arm64-v8a'}, f'Unexpected APK ABIs: {abis}'
+              for name in ('segmentation.onnx', 'embedding.onnx'):
+                  with archive.open('assets/speaker/' + name) as stream:
+                      embedded = hashlib.file_digest(stream, 'sha256').hexdigest()
+                  with (Path('android/app/src/main/assets/speaker') / name).open('rb') as stream:
+                      prepared = hashlib.file_digest(stream, 'sha256').hexdigest()
+                  assert embedded == prepared, 'Missing or changed verified speaker model: ' + name
+          PY
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          BADGING=$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK")
+          grep -q "package: name='com.vinoteapp.dev'" <<< "$BADGING"
+          grep -q '^application-debuggable' <<< "$BADGING"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$APK"
+
+      - name: Stage DEBUG acceptance candidate and checksum (not a production release)
+        run: |
+          mkdir -p artifacts/android-candidate
+          cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/android-candidate/vinote-arm64-debug-candidate.apk
+          printf '%s\n' "$CANDIDATE_SHA" > artifacts/android-candidate/source-commit.txt
+          cd artifacts/android-candidate
+          sha256sum vinote-arm64-debug-candidate.apk > SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-candidate-${{ env.CANDIDATE_SHA }}-${{ github.run_attempt }}
+          path: artifacts/android-candidate/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

@@ -1,10 +1,14 @@
 import { leaveClientIntake } from '../lib/noteIntake'
+import { isAppVideo } from '../lib/appFilePolicy'
 import { retryClientNote } from '../lib/clientNotePipeline'
 import { DetailDisclosure } from '../components/DetailDisclosure'
 import { BottomActionSheet } from '../components/BottomActionSheet'
 import { ApiError } from '../lib/errors'
 import { bindIntakeModel, guardIntakeModel, readIntakeModelContext, sameIntakeModelContext, verifyIntakeModel, type IntakeModelBinding, type IntakeModelContext } from '../lib/intakeModelConfirmation'
 import { sourceRecoveryCopy } from '../lib/sourceRecoveryCopy'
+import { IntakeGenerationConfirmation } from '../components/IntakeGenerationConfirmation'
+import { identityEpoch, subscribeIdentity } from '../lib/sessionIdentity'
+import type { ModelSelection } from '../lib/models'
 import React, { useEffect, useRef, useState } from 'react'
 import { Alert, AppState, BackHandler, Platform, Pressable, ScrollView, View } from 'react-native'
 import { Text } from '../components/AppText'
@@ -41,6 +45,8 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
   const deviceDownload = useRef<ReturnType<typeof downloadBilibiliAudio> | null>(null)
   useEffect(() => () => { deviceDownload.current?.cancel() }, [])
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const [newConfirmation, setNewConfirmation] = useState<{ owner: string; epoch: number; source: string } | null>(null)
+  useEffect(() => subscribeIdentity(() => setNewConfirmation(null)), [])
   const [modelSheet, setModelSheet] = useState(false), [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState(''), [modelContext, setModelContext] = useState<IntakeModelContext | null>(null)
   const modelBinding = useRef<IntakeModelBinding | null>(null), modelSequence = useRef(0), modelSheetOpen = useRef(false)
@@ -141,18 +147,24 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
     void persist().then(onBack).catch(cause => setError(`来源尚未保存：${cause.message}`))
   }
   useEffect(() => { const handler = BackHandler.addEventListener('hardwareBackPress', () => { leave(); return true }); return () => handler.remove() }, [ready, onBack])
-  const submit = async () => {
+  const submit = async (confirmedModels: ModelSelection) => {
     if (locked.current || !ready || (!current.current.operationId && !current.current.uncertain && (serviceState !== 'ready' || videoLinkBlocked || fileTooLarge))) return
+    const confirmation = newConfirmation
+    if (!confirmation || confirmation.owner !== owner.current || confirmation.epoch !== identityEpoch() || confirmation.source !== JSON.stringify(current.current)) { setNewConfirmation(null); return }
     locked.current = true; setBusy(true); setError(''); setTerminal(false); setMessage('正在提交来源，请保留此页')
     try {
+      if (await readAccountId() !== confirmation.owner || identityEpoch() !== confirmation.epoch) throw new Error('账号已切换，未开始生成')
       await persist()
-      const receipt = await submitIntake(owner.current, current.current)
+      if (await readAccountId() !== confirmation.owner || identityEpoch() !== confirmation.epoch || confirmation.source !== JSON.stringify(current.current)) throw new Error('确认信息已变化，未开始生成')
+      const receipt = await submitIntake(owner.current, current.current, confirmedModels)
       if (!mounted.current) return
+      setNewConfirmation(null)
       accept(receipt); await persist()
       if (receipt.receiptState === 'reserved') setMessage('提交已登记，尚未确认排队。请继续核验原提交，不会自动重新派发。')
       else { setMessage('任务已接收，正在整理笔记'); schedule() }
     } catch (cause) {
       if (mounted.current) {
+        setNewConfirmation(null)
         const persisted = current.current.taskId ? current.current : await readIntake(owner.current).catch(() => current.current)
         accept(persisted); setMessage(''); setError(cause instanceof Error ? cause.message : '提交未确认，请检查连接')
       }
@@ -160,9 +172,10 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
   }
   const start = () => {
     if (draft.uncertain || draft.operationId) void query.current()
+    else if (draft.mode === 'file' && draft.file && isAppVideo(draft.file)) setError('App 不支持处理视频文件，请在桌面端管理；历史文件未更改')
     else if (deviceBilibiliPath) saveDeviceAudio()
     else if (iosBilibiliBlocked) return
-    else void submit()
+    else setNewConfirmation({ owner: owner.current, epoch: identityEpoch(), source: JSON.stringify(current.current) })
   }
   const saveDeviceAudio = () => {
     if (locked.current || !ready || serviceState !== 'ready' || !deviceBilibiliAvailable() || current.current.mode !== 'url' || current.current.operationId || current.current.taskId || current.current.uncertain) return
@@ -403,6 +416,10 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
         <Text style={styles.subtitle}>查询或重试沿用原来源；未知提交结果只查询，不重复生成。</Text>
       </DetailDisclosure>}
     </ScrollView>
+    {newConfirmation && <BottomActionSheet visible title="确认本次处理模型" onClose={() => { if (!busy) setNewConfirmation(null) }}>
+      <IntakeGenerationConfirmation owner={newConfirmation.owner} media={!!draft.file && ['audio', 'video'].includes(intakeSourceType(draft.file))}
+        disabled={busy} onCancel={() => setNewConfirmation(null)} onConfirm={models => submit(models)} />
+    </BottomActionSheet>}
     {modelSheet && <BottomActionSheet visible title="确认原任务处理模型" onClose={closeModels} onBack={closeModels}>
       <Text style={styles.subtitle}>旧任务没有保留模型选择。请核对下面的服务与模型；确认后仅恢复这份原任务。</Text>
       <AsyncState loading={modelLoading || modelSending} loadingLabel={modelSending ? '正在确认并恢复原任务…' : '正在读取原任务恢复信息…'} error={sourceRecoveryCopy(modelError)} />

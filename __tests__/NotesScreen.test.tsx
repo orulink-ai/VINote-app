@@ -7,8 +7,11 @@ import { PrimaryButton } from '../src/components/PrimaryButton'
 import { listNotes } from '../src/lib/notes'
 import { subscribeWorkspace, syncWorkspace } from '../src/lib/workspace'
 import type { Note } from '../src/types/api'
+import { readMeetingGroupSources } from '../src/lib/meetingGroupSources'
+import { identityEpoch, transitionIdentity } from '../src/lib/sessionIdentity'
 
 jest.mock('../src/lib/notes', () => ({ listNotes: jest.fn() }))
+jest.mock('../src/lib/meetingGroupSources', () => ({ readMeetingGroupSources: jest.fn() }))
 jest.mock('../src/lib/workspace', () => ({
   syncWorkspace: jest.fn(async () => {}),
   subscribeWorkspace: jest.fn(() => () => {}),
@@ -39,8 +42,154 @@ const selectFilter = async (label: string) => {
 beforeEach(() => {
   jest.clearAllMocks()
   jest.mocked(listNotes).mockResolvedValue([])
+  jest.mocked(readMeetingGroupSources).mockImplementation(async () => ({ owner: 'owner-a', epoch: identityEpoch(), sources: [] }))
   jest.mocked(syncWorkspace).mockResolvedValue(undefined)
   jest.mocked(subscribeWorkspace).mockImplementation(() => () => {})
+})
+
+test('meeting groups expand to exact independent bodies; search and archive do not leak siblings', async () => {
+  const a = makeNote('meeting_recording', { id: 'a', title: '方案甲', content: '完整旧稿' })
+  const b = makeNote('meeting_recording', { id: 'b', title: '方案乙' })
+  const archived = makeNote('meeting_recording', { id: 'archived', archived: true })
+  const onOpen = jest.fn()
+  jest.mocked(listNotes).mockResolvedValue([a, b, archived])
+  jest.mocked(readMeetingGroupSources).mockImplementation(async () => ({ owner: 'owner-a', epoch: identityEpoch(), sources: [a, b, archived].map(note => ({ owner: 'owner-a', noteId: note.id, kind: 'recording', sourceId: 'meeting-001' })) }))
+  await act(async () => { view = Renderer.create(<NotesScreen kind="meeting" onOpen={onOpen} />) })
+  expect(list().data).toHaveLength(1)
+  const group = list().data[0]
+  const header = list().renderItem({ item: group })
+  expect(header.props.accessibilityState.expanded).toBe(false)
+  expect(header.props.accessibilityLabel).toContain('2份纪要')
+  await act(async () => header.props.onPress())
+  expect(list().data).toEqual([group, a, b])
+  await act(async () => list().renderItem({ item: a }).props.onPress())
+  expect(onOpen).toHaveBeenCalledWith('a')
+  expect(a.content).toBe('完整旧稿')
+  await act(async () => view.root.findByType(Field).props.onChangeText('方案乙'))
+  expect(list().data).toEqual([b])
+  expect(readMeetingGroupSources).toHaveBeenCalledTimes(1)
+  expect(syncWorkspace).not.toHaveBeenCalled()
+})
+
+test('source-read failure keeps complete independent bodies readable', async () => {
+  const a = makeNote('meeting_recording', { id: 'a' }), b = makeNote('meeting_recording', { id: 'b' })
+  jest.mocked(listNotes).mockResolvedValue([a, b])
+  jest.mocked(readMeetingGroupSources).mockRejectedValue(new Error('关联不可读'))
+  await renderScreen('meeting')
+  expect(list().data).toEqual([a, b])
+})
+
+test('same mount reload after identity change opens new rows but never old handlers', async () => {
+  let notify!: () => void
+  jest.mocked(subscribeWorkspace).mockImplementation(listener => { notify = listener; return () => {} })
+  const old = makeNote('text', { id: 'old' }), fresh = makeNote('text', { id: 'fresh' }), onOpen = jest.fn()
+  jest.mocked(listNotes).mockResolvedValueOnce([old]).mockResolvedValue([fresh])
+  await act(async () => { view = Renderer.create(<NotesScreen kind="note" onOpen={onOpen} />) })
+  const oldHandler = list().renderItem({ item: old }).props.onPress
+  await act(async () => transitionIdentity('owner-b'))
+  await act(async () => notify())
+  expect(list().data).toEqual([fresh])
+  await act(async () => { oldHandler(); list().renderItem({ item: fresh }).props.onPress() })
+  expect(onOpen.mock.calls).toEqual([['fresh']])
+})
+
+test('deferred source never blocks ready bodies or loading; obsolete source cannot replace a newer list', async () => {
+  const a = makeNote('meeting_recording', { id: 'a' }), b = makeNote('meeting_recording', { id: 'b' })
+  const fresh = [{ ...a, content: '新的完整正文A' }, { ...b, content: '新的完整正文B' }]
+  let finish!: (value: Awaited<ReturnType<typeof readMeetingGroupSources>>) => void
+  const epoch = identityEpoch(), onNotesChange = jest.fn(), onOpen = jest.fn()
+  jest.mocked(listNotes).mockResolvedValueOnce([a, b]).mockResolvedValue(fresh)
+  jest.mocked(readMeetingGroupSources).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  await act(async () => { view = Renderer.create(<NotesScreen kind="meeting" onOpen={onOpen} onNotesChange={onNotesChange} />) })
+  expect(list().data).toEqual([a, b])
+  expect(list().refreshing).toBe(false)
+  expect(onNotesChange).toHaveBeenCalledWith([a, b])
+  await act(async () => list().renderItem({ item: a }).props.onPress())
+  expect(onOpen).toHaveBeenCalledWith('a')
+  await act(async () => list().onRefresh())
+  expect(list().data).toEqual(fresh)
+  await act(async () => finish({ owner: 'owner-a', epoch, sources: [a, b].map(note => ({ owner: 'owner-a', noteId: note.id, kind: 'recording', sourceId: 'meeting-001' })) }))
+  expect(list().data).toEqual(fresh)
+  expect(onNotesChange.mock.calls).toEqual([[[a, b]], [fresh]])
+})
+
+test('current deferred source enriches ready rows without publishing the bodies twice', async () => {
+  const a = makeNote('meeting_recording', { id: 'a' }), b = makeNote('meeting_recording', { id: 'b' })
+  let finish!: (value: Awaited<ReturnType<typeof readMeetingGroupSources>>) => void
+  const epoch = identityEpoch(), onNotesChange = jest.fn()
+  jest.mocked(listNotes).mockResolvedValue([a, b])
+  jest.mocked(readMeetingGroupSources).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  await act(async () => { view = Renderer.create(<NotesScreen kind="meeting" onOpen={jest.fn()} onNotesChange={onNotesChange} />) })
+  expect(list().data).toEqual([a, b])
+  expect(list().refreshing).toBe(false)
+  await act(async () => finish({ owner: 'owner-a', epoch, sources: [a, b].map(note => ({ owner: 'owner-a', noteId: note.id, kind: 'recording', sourceId: 'meeting-001' })) }))
+  expect(list().data[0].notes).toEqual([a, b])
+  expect(onNotesChange).toHaveBeenCalledTimes(1)
+})
+
+test('ABA plus same-mount reload keeps new rows clickable and ignores the old pending source', async () => {
+  let notify!: () => void, finish!: (value: Awaited<ReturnType<typeof readMeetingGroupSources>>) => void
+  jest.mocked(subscribeWorkspace).mockImplementation(listener => { notify = listener; return () => {} })
+  const a = makeNote('meeting_recording', { id: 'a' }), b = makeNote('meeting_recording', { id: 'b' }), epoch = identityEpoch(), onOpen = jest.fn()
+  jest.mocked(listNotes).mockResolvedValue([a, b])
+  jest.mocked(readMeetingGroupSources).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  await act(async () => { view = Renderer.create(<NotesScreen kind="meeting" onOpen={onOpen} />) })
+  const oldHandler = list().renderItem({ item: a }).props.onPress
+  await act(async () => { transitionIdentity('owner-b'); transitionIdentity('owner-a') })
+  await act(async () => notify())
+  expect(list().data).toEqual([a, b])
+  await act(async () => finish({ owner: 'owner-a', epoch, sources: [a, b].map(note => ({ owner: 'owner-a', noteId: note.id, kind: 'recording', sourceId: 'meeting-001' })) }))
+  expect(list().data).toEqual([a, b])
+  await act(async () => { oldHandler(); list().renderItem({ item: a }).props.onPress() })
+  expect(onOpen.mock.calls).toEqual([['a']])
+})
+
+test('deferred source rejection leaves ready bodies intact without a loading gate', async () => {
+  const a = makeNote('meeting_recording', { id: 'a' })
+  let fail!: (error: Error) => void
+  jest.mocked(listNotes).mockResolvedValue([a])
+  jest.mocked(readMeetingGroupSources).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject }))
+  await renderScreen('meeting')
+  expect(list().data).toEqual([a])
+  expect(list().refreshing).toBe(false)
+  await act(async () => fail(new Error('来源读取失败')))
+  expect(list().data).toEqual([a])
+  expect(list().refreshing).toBe(false)
+})
+
+test('project and archive grouping includes only the selected objects, not the whole source', async () => {
+  const a = makeNote('meeting_recording', { id: 'a', project: '当前项目', archived: true })
+  const b = makeNote('meeting_recording', { id: 'b', project: '当前项目', archived: true })
+  const other = makeNote('meeting_recording', { id: 'other', project: '其他项目', archived: true })
+  const active = makeNote('meeting_recording', { id: 'active', project: '当前项目' })
+  jest.mocked(listNotes).mockResolvedValue([a, b, other, active])
+  jest.mocked(readMeetingGroupSources).mockImplementation(async () => ({ owner: 'owner-a', epoch: identityEpoch(), sources: [a, b, other, active].map(note => ({ owner: 'owner-a', noteId: note.id, kind: 'recording', sourceId: 'meeting-001' })) }))
+  await act(async () => { view = Renderer.create(<NotesScreen initialProject="当前项目" kind="meeting" view={{ query: '', filter: '归档', project: '当前项目' }} onOpen={jest.fn()} />) })
+  const group = list().data[0]
+  expect(group.notes).toEqual([a, b])
+  await act(async () => list().renderItem({ item: group }).props.onPress())
+  expect(list().data).toEqual([group, a, b])
+})
+
+test('notes-only browsing does not read original associations', async () => {
+  jest.mocked(listNotes).mockResolvedValue([makeNote('meeting_recording'), makeNote('text')])
+  await renderScreen('note')
+  expect(readMeetingGroupSources).not.toHaveBeenCalled()
+})
+
+test('ABA identity change discards pending source proof and stale row actions', async () => {
+  const a = makeNote('meeting_recording', { id: 'a' }), b = makeNote('meeting_recording', { id: 'b' })
+  let finish!: (value: Awaited<ReturnType<typeof readMeetingGroupSources>>) => void
+  const epoch = identityEpoch(), onOpen = jest.fn()
+  jest.mocked(listNotes).mockResolvedValue([a, b])
+  jest.mocked(readMeetingGroupSources).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  await act(async () => { view = Renderer.create(<NotesScreen kind="meeting" initialNotes={[a]} onOpen={onOpen} />) })
+  const oldRow = list().renderItem({ item: a })
+  await act(async () => { transitionIdentity('owner-b'); transitionIdentity('owner-a') })
+  await act(async () => finish({ owner: 'owner-a', epoch, sources: [a, b].map(note => ({ owner: 'owner-a', noteId: note.id, kind: 'recording', sourceId: 'meeting-001' })) }))
+  expect(list().data).toEqual([])
+  await act(async () => oldRow.props.onPress())
+  expect(onOpen).not.toHaveBeenCalled()
 })
 
 test('returning with this account cached rows keeps reading while background read fails', async () => {

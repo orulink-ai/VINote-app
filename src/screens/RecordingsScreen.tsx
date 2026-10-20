@@ -54,6 +54,10 @@ export function RecordingsScreen({
 }) {
   const activeProgress = useRecordingProgress()
   const [focusedId, setFocusedId] = useState(initialFocusId)
+  const focusContext = useRef({ id: focusedId, epoch: 0 })
+  if (focusContext.current.id !== focusedId) focusContext.current = { id: focusedId, epoch: focusContext.current.epoch + 1 }
+  const [exportFeedback, setExportFeedback] = useState<{ id: string; uri: string; view: number; message: string } | null>(null)
+  useEffect(() => { setExportFeedback(null) }, [focusedId])
   const [renaming, setRenaming] = useState<LocalRecording | null>(null)
   const [items, setItems] = useState<LocalRecording[]>([])
   const [notes, setNotes] = useState<Note[]>([])
@@ -157,18 +161,21 @@ export function RecordingsScreen({
     kind: 'generation' | 'page' = 'page',
   ) => {
     if (!uiCurrent() || locked.current) return
+    const view = focusContext.current.epoch
+    const current = () => uiCurrent() && focusContext.current.epoch === view
     locked.current = true
     setWorking(record.id)
     setWorkingKind(kind)
     try {
       await operation()
     } catch (e) {
-      if (uiCurrent()) Alert.alert('操作未完成', e instanceof Error ? e.message : '请重试')
+      if (current()) Alert.alert('操作未完成', e instanceof Error ? e.message : '请重试')
     } finally {
       locked.current = false
       if (uiCurrent()) {
         setWorking(null)
         setWorkingKind(null)
+        setPhase('')
         await load()
       }
     }
@@ -342,11 +349,18 @@ export function RecordingsScreen({
                 title="导出原音频"
                 disabled={!!working || importing}
                 onPress={() => {
-                  setPhase('正在导出…')
-                  void action(item, () => exportRecording(item))
+                  void action(item, async () => {
+                    const view = focusContext.current.epoch
+                    setExportFeedback(null); setPhase('正在导出…')
+                    const result = await exportRecording(item)
+                    if (uiCurrent() && focusContext.current.epoch === view && focusContext.current.id === item.id) {
+                      setExportFeedback({ id: item.id, uri: item.uri, view, message: result === 'saved' ? '原音频已保存到所选位置。' : '已取消导出，原音频保留。' })
+                    }
+                  })
                 }}
               />
             </View>
+            {exportFeedback?.id === item.id && exportFeedback.uri === item.uri && exportFeedback.view === focusContext.current.epoch && uiCurrent() && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>{exportFeedback.message}</Text>}
             <View
               style={{
                 flexDirection: 'row',

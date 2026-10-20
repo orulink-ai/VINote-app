@@ -1,3 +1,25 @@
+## App 工作路径规范（2026-10-20）
+
+App 开发、测试和文档维护统一在当前父仓库的 `VINote-app` 子模块内进行。除非用户明确要求，不再为 App 额外建立独立 worktree 或临时 workspace；保留当前子模块分支和未提交改动，不自行切换、重置或清理运行进程。历史独立目录的私有备份仅供取证，不作为活动源码工作区。
+
+## 2026-10-20 最新 App 范围（覆写此前音视频会议建议）
+
+会议列表归组仅是展示：同一账号的已登记录音ID，或已保存且精确关联笔记的源文件ID，才可把多个内容对象折叠为同一会议。不得按标题/日期或未经原件验证的task_id猜测；来源缺失、读取失败或冲突保持各份可读，不做传递合并。先按项目/归档/搜索筛选各内容再归组，计数是纪要内容份数而非版本数。展开逐一打开原ID，原存储、版本和单份回收站行为不变，无整组删除/恢复；不恢复同步或推理。
+
+正文读取成功即显示独立可读行并结束loading，来源关联仅异步补充归组，不能阻塞正文或覆盖后续列表。每批正文携带读取时固定identity epoch，行/组handler捕获该批epoch，不能改成读取可变ref放行旧handler；同挂载身份变更后新批次可正常打开，旧批次和ABA迟到来源仍拒绝。
+
+录音与LocalFile导出都复用`originalMedia.exportOriginal`。`recordingLibrary.exportRecording`必须保留原录音校验并返回saved/cancelled；原URI、stat大小、扩展名MIME即可，禁止整文件JS/base64读取。`RecordingsScreen`的导出结果独立于phase，action finally清phase，录音详情/owner/identity epoch变更使旧结果与错误失效；不得把打开系统选择器当保存成功。相关反例见recordingExport与RecordingsScreen.export测试。
+
+App 会议只录音、导入音频及分析录音，沿用 ASR＋speaker＋summary；录屏、视频保留/播放/导出、视频会议和画面分析全部仅桌面。App 不再新增视频文件导入或生成入口；会议与笔记文件导入均在保留副本前拒绝视频，历史视频元数据继续可读、不批量删除、不假迁移，详情明确不支持，只供人工管理。保留音频和 PDF/DOCX 等文档的系统导出选择、取消/失败反馈和 owner/epoch 保护，保留本次模型确认及录音 summary-only 完整 ASR/speaker 复用、unknown 不重放。
+
+Notes B站链接生成笔记仍保留：设备只下载通过既有音轨校验的 AAC/M4A 等声音，不导入或保留源视频。不要根据 B站来源的历史 sourceType=video 标签误禁已保存音轨。Android 通用音频解码器的历史容器能力不等于 App 暴露视频功能，不借此新增抽音会议入口。移除本轮新增的 previewOriginal/OriginalVideoActivity/AVPlayer；executor shutdown 安全捕获仍独立保留。不改同步/版本/目标main；源码候选需重新构建，旧候选0a78b5f不代表本次收紧后的行为。
+
+## 2026-10-20 先前会议声音建议（历史，已被上节覆写）
+
+App 会议仅使用音频或视频的声音做 ASR＋speaker＋summary，不做录屏画面分析，不增加抽帧/OCR/视觉模型或桌面画面证据依赖。保留视频原件播放与导出；不恢复跨端同步。summary-only 必须使用完整已确认的 ASR/speaker 材料，不重新 ASR、不静默换模型或重放 unknown。
+
+区分当前能力与待实现目标：App 录音及录音库支持的会议音频已接 `generateRecording`；笔记音视频只走 `clientNotePipeline` 的 ASR＋笔记 LLM，没有 speaker。会议视频导入当前只保留 LocalFile 并可播放/导出，尚未接入声音会议纪要链，属于用户范围内待补缺口，不能以笔记生成或原生播放成功冒充接通。Android `MeetingAudioModule.toWav` 已选取第一条 audio/* 音轨并流式解码 WAV；iOS 使用 ExtAudioFile，不能宣称所有视频容器均支持。格式、无音轨和实际设备边界见 `docs/original-media-ux.md`。补齐时优先复用声音转换和既有会议模型确认/持久检查点，保留 owner/原件hash/来源关联与未知不重放规则。本次仅文档澄清，未实现该缺口。
+
 <!-- agent-dev-journal:start -->
 ## 开发档案工作流
 
@@ -10,6 +32,10 @@
 
 遵循当前项目的编程与 TDD 要求，不编造测试结果；不适用 TDD 时说明原因及替代验证。档案工作流不构成自动提交、推送或合入授权。
 <!-- agent-dev-journal:end -->
+
+## 2026-10-20 原件保存与生成确认
+
+`originalMedia.ts` / `MeetingFiles.originalMediaProtocol=1` 为账号绑定本机原件提供系统保存选择器和完整视频原生预览/seek；禁止远端 URI、JS/base64 全文件复制，取消不报成功。Android 64 KiB 复制，iOS exporting/asCopy；播放器关闭/后台释放，格式不支持明确提示导出。旧包需重建，不能用 Metro 声称已更新。新 note intake 经 `IntakeGenerationConfirmation` 确认本次冻结模型，不改默认模型，不重放 unknown；录音 summary-only 完整证据合同保持。会议视频原件不冒充已接入录音生成流水线。详见 `docs/original-media-ux.md`，未做本分支原生构建/真机/签名发布。
 
 ## 飞书与会议详情
 

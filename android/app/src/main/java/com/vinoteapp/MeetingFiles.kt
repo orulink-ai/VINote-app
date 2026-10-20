@@ -16,13 +16,37 @@ import java.util.concurrent.atomic.AtomicBoolean
 class MeetingFiles(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
   private var pending: Promise? = null
   private var audioOnly = true
+  private data class Export(val source: File, val promise: Promise, val size: Long, val modified: Long, val cancelled: AtomicBoolean = AtomicBoolean())
+  @Volatile private var exporting: Export? = null
   private val worker = Executors.newSingleThreadExecutor()
   private data class Download(val id: String, val owner: String, val cancelled: AtomicBoolean = AtomicBoolean(), @Volatile var downloader: BilibiliAudioDownloader? = null)
   @Volatile private var invalidated = false
   private val downloadLock = Any()
   private var download: Download? = null
+  private fun dispatch(promise: Promise, rejected: () -> Unit = {}, action: () -> Unit) {
+    val reject = {
+      rejected()
+      promise.reject("FILES_UNAVAILABLE", "文件操作已结束，请重新打开后重试；原文件保留")
+    }
+    if (invalidated || !FileTaskDispatch.execute(worker, Runnable { if (invalidated) reject() else action() })) reject()
+  }
   override fun getName() = "MeetingFiles"
-  override fun getConstants(): MutableMap<String, Any> = mutableMapOf("bilibiliDownloadProtocol" to 1)
+  override fun getConstants(): MutableMap<String, Any> = mutableMapOf("bilibiliDownloadProtocol" to 1, "originalMediaProtocol" to 1)
+  @ReactMethod fun exportOriginal(uri: String, name: String, owner: String, promise: Promise) {
+    context.runOnUiQueueThread {
+      try {
+        val activity = requireNotNull(context.currentActivity)
+        require(!invalidated && exporting == null && pending == null)
+        val source = originalMedia(context, uri, owner)
+        exporting = Export(source, promise, source.length(), source.lastModified())
+        activity.startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+          addCategory(Intent.CATEGORY_OPENABLE); type = "application/octet-stream"
+          putExtra(Intent.EXTRA_TITLE, name.substringAfterLast('/').substringAfterLast('\\').take(180).ifBlank { source.name })
+        }, 4211)
+      } catch (_: Exception) { if (exporting?.promise === promise) exporting = null; promise.reject("ORIGINAL_EXPORT", "无法打开保存位置，请返回前台重试；原文件保留") }
+    }
+  }
+  @ReactMethod fun cancelOriginalExport() { context.runOnUiQueueThread { exporting?.cancelled?.set(true) } }
   @ReactMethod fun addListener(name: String) {}
   @ReactMethod fun removeListeners(count: Double) {}
   @ReactMethod fun startBilibiliDownload(id: String, owner: String, url: String, maximum: Double, promise: Promise) {
@@ -36,7 +60,7 @@ class MeetingFiles(private val context: ReactApplicationContext) : ReactContextB
         job = Download(id, owner); download = job
       }
     } catch (_: Exception) { promise.reject("BILI_DOWNLOAD_INVALID", "下载未开始，请检查B站链接、分P和文件上限，或等待当前下载结束。"); return }
-    worker.execute {
+    dispatch(promise, { synchronized(downloadLock) { if (download === job) download = null } }) {
       val part = File(context.cacheDir, "bilibili-$id.part")
       val target = File(context.cacheDir, "bilibili-$id.m4a")
       var last = 0L
@@ -90,24 +114,53 @@ class MeetingFiles(private val context: ReactApplicationContext) : ReactContextB
   }
   override fun invalidate() {
     invalidated = true
+    exporting?.cancelled?.set(true)
     synchronized(downloadLock) { download?.let { it.cancelled.set(true); it.downloader?.cancel() } }
     worker.shutdown(); super.invalidate()
   }
   init { context.addActivityEventListener(object : BaseActivityEventListener() {
     override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
+      if (requestCode == 4211) {
+        val job = exporting ?: return
+        val destination = data?.data
+        if (resultCode != Activity.RESULT_OK || destination == null) { exporting = null; job.promise.resolve("cancelled"); return }
+        dispatch(job.promise, { job.cancelled.set(true); if (exporting === job) exporting = null }) {
+          try {
+            require(destination.scheme == "content" && !job.cancelled.get())
+            require(job.source.length() == job.size && job.source.lastModified() == job.modified)
+            // rw doesn't truncate. Reject nonempty/unknown-size provider targets
+            // before any write, even if a provider returned an existing URI.
+            requireNotNull(context.contentResolver.openFileDescriptor(destination, "rw")).use { descriptor ->
+              require(descriptor.statSize == 0L)
+              job.source.inputStream().use { input -> java.io.FileOutputStream(descriptor.fileDescriptor).use { output ->
+                OriginalCopy.copyEmptyTarget(descriptor.statSize, input, output, job.size) { !job.cancelled.get() }
+              } }
+              require(job.source.length() == job.size && job.source.lastModified() == job.modified && !job.cancelled.get())
+            }
+            job.promise.resolve("saved")
+          } catch (_: Exception) { job.promise.reject("ORIGINAL_EXPORT", "未能完整保存，请选择新的空文件重试。所选位置可能留下不完整副本，请核对；原文件保留") }
+          finally {
+            // ACTION_CREATE_DOCUMENT normally creates a fresh name, but a URI
+            // alone is not independent ownership proof. Never delete its target.
+            if (exporting === job) exporting = null
+          }
+        }
+        return
+      }
       if (requestCode != 4210) return
       val promise = pending ?: return
       val validateAudio = audioOnly
       pending = null
       val uri = data?.data
       if (resultCode != Activity.RESULT_OK || uri == null) { promise.resolve(null); return }
-      worker.execute {
+      dispatch(promise) {
         val target = File(context.cacheDir, "import-${UUID.randomUUID()}")
         try {
           var name = "audio.m4a"
           context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) name = cursor.getString(0) ?: name
           }
+          require(!OriginalFilePolicy.video(name, context.contentResolver.getType(uri))) { "App 不支持导入视频，请在桌面端管理；未保留副本" }
           context.contentResolver.openInputStream(uri)?.use { source -> target.outputStream().use { output ->
             val buffer = ByteArray(65536)
             var total = 0L
@@ -140,7 +193,7 @@ class MeetingFiles(private val context: ReactApplicationContext) : ReactContextB
   }
   private fun pick(onlyAudio: Boolean, promise: Promise) {
     val activity = context.currentActivity
-    if (activity == null || pending != null) { promise.reject("AUDIO_PICKER", "请返回前台后重试"); return }
+    if (invalidated || activity == null || pending != null || exporting != null) { promise.reject("AUDIO_PICKER", "请返回前台后重试"); return }
     pending = promise
     audioOnly = onlyAudio
     try { activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type = if (onlyAudio) "audio/*" else "*/*"; addCategory(Intent.CATEGORY_OPENABLE) }, 4210) }

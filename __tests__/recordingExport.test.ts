@@ -1,5 +1,7 @@
 import FS from 'react-native-fs'
 import Share from 'react-native-share'
+import { NativeModules, Platform } from 'react-native'
+import { transitionIdentity } from '../src/lib/sessionIdentity'
 import { readAccountId } from '../src/lib/storage'
 import { exportRecording, type LocalRecording } from '../src/features/recording/recordingLibrary'
 
@@ -13,17 +15,49 @@ const recording: LocalRecording = {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  transitionIdentity('alice')
+  jest.replaceProperty(Platform, 'OS', 'android')
+  NativeModules.MeetingFiles = { originalMediaProtocol: 1, exportOriginal: jest.fn(async () => 'saved'), cancelOriginalExport: jest.fn() }
   jest.mocked(readAccountId).mockResolvedValue('alice')
   jest.mocked(FS.exists).mockResolvedValue(true)
   jest.mocked(FS.stat).mockResolvedValue({ size: 50_000_000, isFile: () => true } as never)
 })
 
-test('shares the complete original file without copying, reencoding or deleting it', async () => {
-  await exportRecording(recording)
+test('exports the complete recording through the real shared native bridge without copying or reading it into JS', async () => {
+  await expect(exportRecording(recording)).resolves.toBe('saved')
   expect(FS.stat).toHaveBeenCalledWith('/documents/recordings/accounts/alice/long-meeting.m4a')
-  expect(Share.open).toHaveBeenCalledWith(expect.objectContaining({ url: recording.uri, type: 'audio/mp4', failOnCancel: false, saveToFiles: true }))
+  expect(NativeModules.MeetingFiles.exportOriginal).toHaveBeenCalledWith(recording.uri, '客户会议.m4a', 'alice')
+  expect(Share.open).not.toHaveBeenCalled()
+  expect(FS.readFile).not.toHaveBeenCalled()
   expect(FS.copyFile).not.toHaveBeenCalled()
   expect(FS.unlink).not.toHaveBeenCalled()
+})
+
+test('returns system cancellation instead of assuming save success', async () => {
+  NativeModules.MeetingFiles.exportOriginal.mockResolvedValueOnce('cancelled')
+  await expect(exportRecording(recording)).resolves.toBe('cancelled')
+})
+
+test('iOS records use the same OS document export with extension-derived audio MIME', async () => {
+  jest.replaceProperty(Platform, 'OS', 'ios')
+  jest.mocked(Share.open).mockResolvedValueOnce({ success: true, message: 'saved' })
+  await expect(exportRecording(recording)).resolves.toBe('saved')
+  expect(Share.open).toHaveBeenCalledWith(expect.objectContaining({ url: recording.uri, type: 'audio/mp4', saveToFiles: true }))
+  expect(FS.readFile).not.toHaveBeenCalled()
+})
+
+test('ABA identity change during stat cannot open a picker even when the owner name returns', async () => {
+  jest.mocked(FS.stat).mockImplementationOnce(async () => {
+    transitionIdentity('bob'); transitionIdentity('alice')
+    return { size: 50_000_000, isFile: () => true } as never
+  })
+  await expect(exportRecording(recording)).rejects.toThrow('账号已切换')
+  expect(NativeModules.MeetingFiles.exportOriginal).not.toHaveBeenCalled()
+})
+
+test('an identity change before the picker completion cannot report an old-owner save', async () => {
+  NativeModules.MeetingFiles.exportOriginal.mockImplementationOnce(async () => { transitionIdentity('bob'); return 'saved' })
+  await expect(exportRecording(recording)).rejects.toThrow('账号已切换')
 })
 
 test.each([

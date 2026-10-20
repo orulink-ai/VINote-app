@@ -1,6 +1,7 @@
 import { identityEpoch } from './sessionIdentity'
 import FS from 'react-native-fs'
-import Share from 'react-native-share'
+import { exportOriginal } from './originalMedia'
+import { isAppVideo } from './appFilePolicy'
 import { NativeModules } from 'react-native'
 import { readAccountId } from './storage'
 import { operationId } from './integration'
@@ -103,6 +104,7 @@ export async function importLocalFile(options: { keepAudioInFiles?: boolean; pur
   try {
     if (owner !== await readAccountId()) throw new Error('账号已切换，请重新导入')
     const extension = selected.name.split('.').pop()?.toLowerCase() || ''
+    if (isAppVideo({ extension })) throw new Error('App 不支持导入视频，请在桌面端管理；此处未保留副本')
     const purpose = options.purpose ?? (options.keepAudioInFiles ? 'note' : 'meeting')
     if (audioExtensions.has(extension) && purpose === 'meeting' && !options.keepAudioInFiles) return await importRecording(selected)
     if (!allowed.has(extension)) throw new Error('此文件格式暂不支持')
@@ -159,9 +161,7 @@ export async function deleteLocalFile(file: LocalFile, expectedOwner?: string, e
   }
 }
 export async function exportLocalFile(file: LocalFile) {
-  const { path } = await directory(); valid(file, path)
-  if (!await FS.exists(file.uri)) throw new Error('文件在当前设备不可用')
-  await Share.open({ url: file.uri, title: file.name, failOnCancel: false, saveToFiles: true })
+  return exportOriginal(file)
 }
 export async function readTextFile(file: LocalFile) {
   const { path } = await directory(); valid(file, path)

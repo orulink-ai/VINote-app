@@ -6,6 +6,7 @@ import { generationBaseUrl, integrationJson, operationId, verifyContentService }
 import { loadModels, loadSelection, type ModelSelection } from './models'
 import { modelEligible } from './modelEligibility'
 import { readAccountId } from './storage'
+import { isAppVideo } from './appFilePolicy'
 import { identityEpoch } from './sessionIdentity'
 import { transcribe, type TranscriptionCheckpoint } from './meetingCloud'
 import { chatCompletion } from './chatCompletion'
@@ -85,12 +86,13 @@ async function fileIdentity(owner: string, draft: IntakeDraft): Promise<Fingerpr
   await ownerGuard(owner)
   return { uri: file.uri, size, sha256 }
 }
-export async function prepareClientNote(owner: string, draft: IntakeDraft): Promise<IntakeDraft> {
+export async function prepareClientNote(owner: string, draft: IntakeDraft, confirmedModels?: ModelSelection): Promise<IntakeDraft> {
   await ownerGuard(owner)
   const epoch = identityEpoch()
   if (draft.mode === 'url') draft = { ...draft, url: canonicalSourceUrl(draft.url) }
   if (draft.operationId || draft.taskId || draft.uncertain) throw new Error('原操作必须先核验，不能重新提交')
-  const models = { ...await loadSelection() }
+  if (draft.mode === 'file' && draft.file && isAppVideo(draft.file)) throw new Error('App 不支持处理视频文件，请在桌面端管理；原记录保留')
+  const models = { ...(confirmedModels || await loadSelection()) }
   const catalog = await loadModels(true)
   const media = ['audio', 'video'].includes(draft.sourceType || '')
   for (const kind of (media ? ['asr', 'llm'] : ['llm']) as ('asr' | 'llm')[]) {
@@ -110,6 +112,7 @@ export async function prepareClientNote(owner: string, draft: IntakeDraft): Prom
     const sameContent = source.sha256 && previous.source.sha256 === source.sha256 && previous.source.size === source.size
     if ((sameUrl || sameContent || JSON.stringify(previous.source) === JSON.stringify(source)) && (previous.inFlight || previous.transcription?.version === 5 && previous.transcription.inFlight || previous.status === 'unknown')) throw new Error('此来源有未确认的模型请求，不能另建操作重复发送')
     if (JSON.stringify(previous.source) === JSON.stringify(source) && previous.status === 'pending') {
+      if (confirmedModels && JSON.stringify(previous.models) !== JSON.stringify(models)) throw new Error('原准备操作模型不同，请核验原操作；未替换已保存模型')
       await ownerGuard(owner)
       validate(previous, owner, previous.draft)
       return previous.draft // Only an explicit submit may finish this pre-dispatch storage transaction.
@@ -247,6 +250,7 @@ async function claimClientNote(owner: string, draft: IntakeDraft) {
   const claimed = active.get(id)
   if (claimed) return claimed
   if (record.result || record.inFlight || record.status === 'unknown') return
+  if (record.draft.mode === 'file' && record.draft.file && isAppVideo(record.draft.file)) throw new Error('App 不再处理视频文件；原操作与历史数据保留，请在桌面端管理视频')
   const work = { record, promise: Promise.resolve() }
   // Publish the claim synchronously before starting any asynchronous worker.
   active.set(id, work)

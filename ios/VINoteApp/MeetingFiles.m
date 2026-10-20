@@ -27,10 +27,16 @@ RCT_REMAP_METHOD(pickFile, pickFile:(RCTPromiseResolveBlock)resolve rejecter:(RC
   UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[audioOnly ? UTTypeAudio : UTTypeItem] asCopy:YES];
   picker.delegate=self; picker.allowsMultipleSelection=NO; [presenter presentViewController:picker animated:YES completion:nil];
 }
-- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller { self.resolve(NSNull.null); self.resolve=nil; self.reject=nil; }
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller { if (self.resolve) self.resolve(NSNull.null); self.resolve=nil; self.reject=nil; }
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+  if (!self.resolve) return;
   RCTPromiseResolveBlock resolve=self.resolve; RCTPromiseRejectBlock reject=self.reject; self.resolve=nil; self.reject=nil;
   NSURL *url=urls.firstObject; if (!url) { resolve(NSNull.null); return; }
+  UTType *contentType=nil;
+  [url getResourceValue:&contentType forKey:NSURLContentTypeKey error:nil];
+  if ([@[@"mp4",@"mov",@"mkv",@"webm",@"avi",@"m4v"] containsObject:url.pathExtension.lowercaseString] || [contentType conformsToType:UTTypeMovie] || [contentType conformsToType:UTTypeVideo]) {
+    reject(@"VIDEO_UNSUPPORTED",@"App 不支持导入视频，请在桌面端管理；未保留副本",nil); return;
+  }
   BOOL validateAudio=self.audioOnly;
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{
     BOOL access=[url startAccessingSecurityScopedResource];

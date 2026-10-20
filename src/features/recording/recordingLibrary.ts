@@ -1,6 +1,6 @@
 import type { ASRDiagnostic } from '../../lib/asrFailure'
 import FS from 'react-native-fs'
-import Share from 'react-native-share'
+import { exportOriginal } from '../../lib/originalMedia'
 import { NativeModules } from 'react-native'
 import { recordingTitle } from './recordingTitle'
 import { readAccountId } from '../../lib/storage'
@@ -103,6 +103,7 @@ export async function listRecordings(): Promise<LocalRecording[]> {
   return results.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 export async function exportRecording(record: LocalRecording) {
+  const epoch = identityEpoch()
   const owner = await readAccountId()
   const directory = await accountDirectory()
   if (!owner || directory !== `${FS.DocumentDirectoryPath}/recordings/accounts/${encodeURIComponent(owner)}`) throw new Error('账号已切换，请重新导出')
@@ -111,10 +112,15 @@ export async function exportRecording(record: LocalRecording) {
   if (!await FS.exists(path)) throw new Error('未找到有效录音文件，原始记录已保留')
   const file = await FS.stat(path)
   if (!file.isFile() || !Number.isFinite(Number(file.size)) || Number(file.size) <= 0) throw new Error('未找到有效录音文件，原始记录已保留')
-  if (await readAccountId() !== owner) throw new Error('账号已切换，请重新导出')
-  // Android FileProvider only grants the chosen file; share the original directly so
-  // long recordings need neither a second copy nor cleanup before the receiver reads it.
-  await Share.open({ url: record.uri, type: ({ mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', aac: 'audio/aac', ogg: 'audio/ogg' } as Record<string, string>)[extension(record)] || 'audio/mp4', title: record.title, failOnCancel: false, saveToFiles: true })
+  if (await readAccountId() !== owner || identityEpoch() !== epoch) throw new Error('账号已切换，请重新导出')
+  const ext = extension(record)
+  // Keep the recording checks above; the shared exporter owns the OS save result
+  // and rechecks owner/epoch. Neither layer reads the whole original into JS.
+  const result = await exportOriginal({ id: record.id, uri: record.uri,
+    name: `${record.title.trim() || '会议录音'}.${ext}`, extension: ext, size: Number(file.size),
+    mimeType: ({ mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', aac: 'audio/aac', ogg: 'audio/ogg' } as Record<string, string>)[ext] || 'audio/mp4' })
+  if (await readAccountId() !== owner || identityEpoch() !== epoch) throw new Error('账号已切换，请核对原保存位置')
+  return result
 }
 export async function deleteRecording(record: LocalRecording) {
   const owner = await readAccountId()

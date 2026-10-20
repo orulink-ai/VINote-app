@@ -17,6 +17,13 @@ jest.mock('../src/lib/models', () => ({ loadSelection: jest.fn(async () => ({ as
 jest.mock('../src/lib/meetingCloud', () => ({ transcribe: jest.fn(async () => '完整转写') }))
 jest.mock('../src/lib/chatCompletion', () => ({ chatCompletion: jest.fn(async () => ({ choices: [{ message: { content: '# 笔记' }, finish_reason: 'stop' }] })) }))
 const draft: IntakeDraft = { mode: 'url', url: 'https://article.example/a', sourceType: 'file' }
+test('a historical video file cannot reserve a new model operation or run inference', async () => {
+  await expect(prepareClientNote('alice', { mode: 'file', url: '', sourceType: 'video', file: { id: 'old', name: 'old.mp4', extension: 'mp4', uri: 'file:///documents/old.mp4' } as never })).rejects.toThrow('视频')
+  expect(loadModels).not.toHaveBeenCalled()
+  expect(transcribe).not.toHaveBeenCalled()
+  expect(chatCompletion).not.toHaveBeenCalled()
+  expect(await Storage.getAllKeys()).toEqual([])
+})
 const extracted = { extraction_protocol: 1, title: '文章', text: '完整来源', source_sha256: 'a'.repeat(64), source_type: 'webpage' }
 beforeEach(async () => {
   jest.clearAllMocks()
@@ -35,6 +42,28 @@ test('new operations freeze LAN origin and never send model IDs to extraction', 
   expect(transcribe).not.toHaveBeenCalled()
   expect(chatCompletion).toHaveBeenCalledWith('same-llm', expect.any(Array), 'alice')
   expect((await readClientNote('alice', receipt)).result?.markdown).toBe('# 笔记')
+})
+
+test('explicit task models survive changed global selection without writing defaults or calling inference', async () => {
+  const models = { asr_model: 'same-asr', llm_model: 'explicit-llm' }
+  jest.mocked(loadModels).mockResolvedValueOnce([
+    { id: 'same-asr', modelType: 'asr', runtimeStatus: 'available' },
+    { id: 'explicit-llm', modelType: 'llm', runtimeStatus: 'available' },
+  ])
+  const receipt = await prepareClientNote('alice', draft, models)
+  expect(receipt.modelSelection).toEqual(models)
+  expect(chatCompletion).not.toHaveBeenCalled(); expect(transcribe).not.toHaveBeenCalled()
+  expect(Storage.setItem).not.toHaveBeenCalledWith('vinote:alice:models', expect.anything())
+})
+
+test('a pending source keeps its original models instead of silently replacing the confirmed pair', async () => {
+  const receipt = await prepareClientNote('alice', draft)
+  jest.mocked(loadModels).mockResolvedValueOnce([
+    { id: 'other', modelType: 'llm', runtimeStatus: 'available' },
+  ])
+  await expect(prepareClientNote('alice', draft, { asr_model: 'same-asr', llm_model: 'other' })).rejects.toThrow('原准备操作模型不同')
+  expect((await readClientNote('alice', receipt)).models.llm_model).toBe('same-llm')
+  expect(chatCompletion).not.toHaveBeenCalled(); expect(transcribe).not.toHaveBeenCalled()
 })
 test('transport ambiguity is durable and explicit retry cannot replay', async () => {
   jest.mocked(chatCompletion).mockRejectedValueOnce(new Error('connection lost'))
