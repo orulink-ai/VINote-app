@@ -1,3 +1,17 @@
+## 2026-10-20 最新 App 范围（覆写此前音视频会议建议）
+
+录音与LocalFile导出都复用`originalMedia.exportOriginal`。`recordingLibrary.exportRecording`必须保留原录音校验并返回saved/cancelled；原URI、stat大小、扩展名MIME即可，禁止整文件JS/base64读取。`RecordingsScreen`的导出结果独立于phase，action finally清phase，录音详情/owner/identity epoch变更使旧结果与错误失效；不得把打开系统选择器当保存成功。相关反例见recordingExport与RecordingsScreen.export测试。
+
+App 会议只录音、导入音频及分析录音，沿用 ASR＋speaker＋summary；录屏、视频保留/播放/导出、视频会议和画面分析全部仅桌面。App 不再新增视频文件导入或生成入口；会议与笔记文件导入均在保留副本前拒绝视频，历史视频元数据继续可读、不批量删除、不假迁移，详情明确不支持，只供人工管理。保留音频和 PDF/DOCX 等文档的系统导出选择、取消/失败反馈和 owner/epoch 保护，保留本次模型确认及录音 summary-only 完整 ASR/speaker 复用、unknown 不重放。
+
+Notes B站链接生成笔记仍保留：设备只下载通过既有音轨校验的 AAC/M4A 等声音，不导入或保留源视频。不要根据 B站来源的历史 sourceType=video 标签误禁已保存音轨。Android 通用音频解码器的历史容器能力不等于 App 暴露视频功能，不借此新增抽音会议入口。移除本轮新增的 previewOriginal/OriginalVideoActivity/AVPlayer；executor shutdown 安全捕获仍独立保留。不改同步/版本/目标main；源码候选需重新构建，旧候选0a78b5f不代表本次收紧后的行为。
+
+## 2026-10-20 先前会议声音建议（历史，已被上节覆写）
+
+App 会议仅使用音频或视频的声音做 ASR＋speaker＋summary，不做录屏画面分析，不增加抽帧/OCR/视觉模型或桌面画面证据依赖。保留视频原件播放与导出；不恢复跨端同步。summary-only 必须使用完整已确认的 ASR/speaker 材料，不重新 ASR、不静默换模型或重放 unknown。
+
+区分当前能力与待实现目标：App 录音及录音库支持的会议音频已接 `generateRecording`；笔记音视频只走 `clientNotePipeline` 的 ASR＋笔记 LLM，没有 speaker。会议视频导入当前只保留 LocalFile 并可播放/导出，尚未接入声音会议纪要链，属于用户范围内待补缺口，不能以笔记生成或原生播放成功冒充接通。Android `MeetingAudioModule.toWav` 已选取第一条 audio/* 音轨并流式解码 WAV；iOS 使用 ExtAudioFile，不能宣称所有视频容器均支持。格式、无音轨和实际设备边界见 `docs/original-media-ux.md`。补齐时优先复用声音转换和既有会议模型确认/持久检查点，保留 owner/原件hash/来源关联与未知不重放规则。本次仅文档澄清，未实现该缺口。
+
 <!-- agent-dev-journal:start -->
 ## 开发档案工作流
 

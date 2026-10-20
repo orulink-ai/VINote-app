@@ -17,6 +17,13 @@ jest.mock('../src/lib/models', () => ({ loadSelection: jest.fn(async () => ({ as
 jest.mock('../src/lib/meetingCloud', () => ({ transcribe: jest.fn(async () => '完整转写') }))
 jest.mock('../src/lib/chatCompletion', () => ({ chatCompletion: jest.fn(async () => ({ choices: [{ message: { content: '# 笔记' }, finish_reason: 'stop' }] })) }))
 const draft: IntakeDraft = { mode: 'url', url: 'https://article.example/a', sourceType: 'file' }
+test('a historical video file cannot reserve a new model operation or run inference', async () => {
+  await expect(prepareClientNote('alice', { mode: 'file', url: '', sourceType: 'video', file: { id: 'old', name: 'old.mp4', extension: 'mp4', uri: 'file:///documents/old.mp4' } as never })).rejects.toThrow('视频')
+  expect(loadModels).not.toHaveBeenCalled()
+  expect(transcribe).not.toHaveBeenCalled()
+  expect(chatCompletion).not.toHaveBeenCalled()
+  expect(await Storage.getAllKeys()).toEqual([])
+})
 const extracted = { extraction_protocol: 1, title: '文章', text: '完整来源', source_sha256: 'a'.repeat(64), source_type: 'webpage' }
 beforeEach(async () => {
   jest.clearAllMocks()

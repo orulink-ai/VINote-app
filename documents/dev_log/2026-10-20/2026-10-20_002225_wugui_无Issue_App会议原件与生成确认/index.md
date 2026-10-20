@@ -88,3 +88,36 @@
 提交7bf9883已推送，中文草稿PR #13目标main。GitHub运行39293209761在编译前拒绝workflow：job级env不允许runner上下文，具体为GRADLE_USER_HOME中的runner.temp；并非Android源码/模型错误。改为该临时runner的github.workspace/.candidate-gradle，保留独立缓存目录，追加修复提交。普通离线CI独立运行；尚未宣称候选构建成功。静态YAML检查不覆盖GitHub上下文语义，此失败记录保留。
 
 运行39293608691已进入真实runner，但SDK准备失败：setup-android的默认packages包含已不存在的`tools`，sdkmanager明确返回`Failed to find package 'tools'`。显式仅准备`platform-tools`，后续SDK/NDK/CMake仍按工程已选版本安装；关闭无关许可证全文日志。此前失败在源码编译前，未调用模型，未产生APK。
+
+## 2026-10-20｜wugui / Codex：候选证据与当时会议范围澄清（后被下节覆写）
+
+- 只读核实候选 CI 39293842504 成功，实际 head `0a78b5f66e51ca87da310f38874a8458bf00620e`；standalone arm64 DEBUG APK 已构建，内置 JS、speaker 字节、ABI、包名及签名有效性检查通过。它替代前文“未产生候选”的状态，不抹去两次历史失败；不是正式版发布或本代理真机验收。本代理未安装/操作手机、未调用 ASR/LLM。当前父代理负责实机检查，版本仍0.1.4/code9。
+- 最新用户明确：App 支持音视频的声音会议处理即可，不需要分析录屏画面。目标链为声音 ASR＋speaker＋summary，视频原件播放/导出保留；不引入录屏采集、抽帧、OCR、视觉模型或桌面视频证据链，不恢复同步。
+- 对照当前代码：`localFiles.ts:importLocalFile` 将会议音频转交 `recordingLibrary.ts:importRecording`；后者仅接纳 m4a/mp3/wav/aac/flac/ogg（文件库的 opus 识别不等于会议录音库已支持）。`generateRecording.ts` 并行运行声音 `transcribe`/`analyzeSpeakers`，保存后用 `meetingEvidence` 调用会议 `summarize`。视频会议导入不进入该分支，而是保存 LocalFile；目前视频详情没有会议声音生成入口，仍是用户范围内待补缺口。
+- 已有底层能力：Android `MeetingAudioModule.toWav` 选择第一条 audio/* 音轨，以 MediaCodec 流式解码为16k/mono/PCM16 WAV；ASR 与 speaker 分支均调用此接口。`clientNotePipeline` 对笔记音视频已走 transcribe→笔记 LLM，但不包含 speaker，不能把它称作完整会议链。iOS `MeetingAudio.m` 使用 ExtAudioFile，不是显式视频音轨解码；不能将 Android 能力外推至全部 iOS 视频容器。
+- 最小建议而非本轮实现：会议视频详情提供显式生成确认，冻结 owner/file ID/URI/hash/模型/操作，复用既有转换，持久保存派生声音 WAV 及其原视频来源关联后进入现有会议流水线。原视频不移动/覆盖，派生引用参与删除保护；不把 cache URI 当持久源，不通过改后缀冒充音频，不自动推理或重放 unknown。iOS 容器解码先验证，必要时有界 AVAssetReader 选择音轨；无音轨/不支持应失败保留原件，不返回空成功。
+- 本次独占修改仅 `docs/original-media-ux.md`、`AGENTS.md` 和本档案；不改功能源码/测试/workflow，不额外推理、不提交。历史正文保留；新增能力需另做离线反例、完整构建和父代理实际设备验收，现有候选不能证明缺口已补齐。
+
+## 2026-10-20｜wugui / Codex：最新用户覆写为 App 录音范围
+
+- 用户再次明确视频保留/播放/导出、会议录屏/画面分析全部仅桌面；App会议只录音及分析录音。撤销上节“补视频→会议声音链”的建议，不将它保留为范围内缺口。Notes B站链接仍可保存音轨生成笔记，PDF/DOCX等文档不受影响。
+- 实际源码撤回：删除本轮新增 OriginalVideoActivity/OriginalLifecycle 及 manifest 注册、JS preview/close API、文件库视频播放；iOS只撤AVKit/OriginalVideoController/AVPlayer与专用视频验证增量，原有音频导入和选择器安全检查保留。executor安全捕获迁入FileTaskDispatch，与视频生命周期解除耦合。
+- 收紧新写入：Android选择器先核对扩展名/MIME，iOS先核对扩展名/UTType，JS导入再防御，拒绝新视频且不写账号保留副本。原生导出/JS导出只接受音频文档。旧视频元数据、关联和筛选仍可读；详情不展示播放/导出/生成，提示不支持且未删除。手动删除仍须原有owner/确认流程，无批量清理或假迁移。
+- 新模型操作拒绝实际视频文件；历史已完成结果和unknown不被自动更改/重跑。B站M4A虽保留历史sourceType=video来源标签，按真实文件扩展名放行，既有笔记B站流程回归通过。录音summary-only完整ASR/speaker复用、模型确认/GET-only和OS导出反馈保持。
+- TDD：新增视频导入及历史视频UI反例先失败（旧行为复制视频并显示播放/导出/生成），修复后通过。原15 suites/221项同组调整后15 suites/232项通过，TypeScript通过；JVM复制6项及真实executor shutdown/音频文档vs视频策略反例通过。Android变更真实SDK/API classpath手动编译通过；iOS未Xcode编译、未真机。仅源码/离线验证，不把旧0a78b5f候选当本次APK。
+- 当前不触碰Hume workflow、不改版本/目标main、不安装/手机操作、不云端/ASR/LLM、不提交。提交前由父代理审查；历史正文保留以解释范围变更。
+
+- 最终收口：移除可见视频筛选，旧video/screen筛选规范化为全部，历史视频仍可在全部找到；会议文案不再承诺录屏，历史视频详情仅提示“此视频仅保留历史记录，视频功能请使用桌面端。”，不出现“可导出/人工管理”。中间232项后新增旧筛选兼容反例并加入B站音轨回归，最终17 suites/244 tests通过（原15 suites最终233项＋B站2 suites/11项）。TypeScript、manifest解析和Android原生手动编译通过。git diff origin/main确认manifest净差异为零、既有音频解码/会议生成/summary-only未更改；无workflow/版本/签名配置修改。源码冻结交父代理审查，未提交。
+
+### 主审追加：真实录音导出接通统一OS保存结果
+
+- 主审发现真实`recordingLibrary.exportRecording`仍调用旧Share.open并返回void，`RecordingsScreen`只有正在导出phase，无保存/取消反馈。该缺口真实存在，不将此前LocalFile导出测试当作真实录音验收。
+- TDD先验证5个service反例失败（void结果、未走Android exporter、ABA与迟到owner保护缺失），另3个Screen反例失败（无saved/cancelled反馈、切换录音后旧错误弹窗）。修复保留原录音id/目录/扩展名/file stat校验，加首await前identity epoch，调用真实共享exportOriginal传原URI/size/音频MIME，无整段readFile/base64。Android保持既有三参数原生协议；iOS复用同一Share保存选择器并传音频MIME。
+- Screen保存/取消文案独立于phase；action finally清phase与working，reload不清掉本次有效结果。锁在实际action内生效，重复点击不再改phase或提交两次。录音详情epoch＋owner identity epoch＋id/URI绑定反馈，切走再回到同录音、账号ABA、卸载均丢弃迟到结果，旧详情错误也不污染新详情。
+- 聚焦7 suites/52 tests通过；加入前述audio-only/模型确认/summary-only/B站回归后最终22 suites/276 tests通过，TypeScript及diff检查通过。最新改动只有TS/测试/文档，不需要额外原生接口。视频收缩与workflow/版本/签名配置保持；无云端/ASR/LLM、无设备操作、未提交，再次冻结交父代理审查。
+
+### 2026-10-20 09:33 Asia/Shanghai｜wugui / Codex 提交前复核
+
+- 主线程实际复跑22 suites/276 tests，全部通过；TypeScript通过。独立只读审查未发现本写集未解决P1/P2，允许提交功能分支并重建候选，仍不等于实机验收或正式发布。
+- 早上已验证并保留数据安装旧head0a78b5f的standalone DEBUG候选；它包含随后撤销的视频功能，不能用作最新范围的验收包。最新源码需重新构建。手机由offline恢复到unauthorized，正在等待用户于设备确认USB调试；没有清除数据或代操作授权。
+- 桌面summary-only实际候选第一步返回无效JSON，未进入第二步；无ASR调用、无自动重试，未修改本App的总结模型或既有逐字稿。内容评分门槛仍未通过，本PR保持草稿，不合并、不发布、不更新父gitlink。

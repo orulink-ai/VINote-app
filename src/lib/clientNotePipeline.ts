@@ -6,6 +6,7 @@ import { generationBaseUrl, integrationJson, operationId, verifyContentService }
 import { loadModels, loadSelection, type ModelSelection } from './models'
 import { modelEligible } from './modelEligibility'
 import { readAccountId } from './storage'
+import { isAppVideo } from './appFilePolicy'
 import { identityEpoch } from './sessionIdentity'
 import { transcribe, type TranscriptionCheckpoint } from './meetingCloud'
 import { chatCompletion } from './chatCompletion'
@@ -90,6 +91,7 @@ export async function prepareClientNote(owner: string, draft: IntakeDraft, confi
   const epoch = identityEpoch()
   if (draft.mode === 'url') draft = { ...draft, url: canonicalSourceUrl(draft.url) }
   if (draft.operationId || draft.taskId || draft.uncertain) throw new Error('原操作必须先核验，不能重新提交')
+  if (draft.mode === 'file' && draft.file && isAppVideo(draft.file)) throw new Error('App 不支持处理视频文件，请在桌面端管理；原记录保留')
   const models = { ...(confirmedModels || await loadSelection()) }
   const catalog = await loadModels(true)
   const media = ['audio', 'video'].includes(draft.sourceType || '')
@@ -248,6 +250,7 @@ async function claimClientNote(owner: string, draft: IntakeDraft) {
   const claimed = active.get(id)
   if (claimed) return claimed
   if (record.result || record.inFlight || record.status === 'unknown') return
+  if (record.draft.mode === 'file' && record.draft.file && isAppVideo(record.draft.file)) throw new Error('App 不再处理视频文件；原操作与历史数据保留，请在桌面端管理视频')
   const work = { record, promise: Promise.resolve() }
   // Publish the claim synchronously before starting any asynchronous worker.
   active.set(id, work)

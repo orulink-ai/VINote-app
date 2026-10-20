@@ -48,12 +48,19 @@ it('removes an empty imported copy and does not persist its metadata', async () 
   expect(FS.writeFile).not.toHaveBeenCalled()
 })
 
-it('records explicit meeting video and note media purposes without format inference', async () => {
+it.each(['meeting', 'note'] as const)('rejects new %s video before any retained copy or metadata and releases picker cache', async purpose => {
   NativeModules.MeetingFiles.pickFile.mockResolvedValue({ uri: 'content://picked/video', name: 'sample.mp4' })
-  expect(await importLocalFile({ purpose: 'meeting', expectedOwner: 'owner' })).toMatchObject({ category: 'video', purpose: 'meeting' })
-  NativeModules.MeetingFiles.pickFile.mockResolvedValue({ uri: 'content://picked/audio', name: 'sample.wav' })
-  expect(await importLocalFile({ purpose: 'note', expectedOwner: 'owner' })).toMatchObject({ category: 'audio', purpose: 'note' })
+  await expect(importLocalFile({ purpose, expectedOwner: 'owner' })).rejects.toThrow('视频')
+  expect(FS.copyFile).not.toHaveBeenCalled()
+  expect(FS.writeFile).not.toHaveBeenCalled()
   expect(importRecording).not.toHaveBeenCalled()
+  expect(NativeModules.MeetingFiles.releaseAudio).toHaveBeenCalledWith('content://picked/video')
+})
+
+it.each(['pdf', 'docx', 'aac'])('retains supported note %s imports', async extension => {
+  NativeModules.MeetingFiles.pickFile.mockResolvedValue({ uri: 'content://picked/file', name: `sample.${extension}` })
+  expect(await importLocalFile({ purpose: 'note', expectedOwner: 'owner' })).toMatchObject({ extension, purpose: 'note' })
+  expect(FS.copyFile).toHaveBeenCalled()
 })
 
 it('explicit meeting audio retains the recording detail workflow', async () => {

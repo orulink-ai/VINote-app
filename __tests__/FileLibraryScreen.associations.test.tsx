@@ -25,6 +25,19 @@ test.each(['saved', 'cancelled'] as const)('file export reports %s without chang
   expect(createTextNote).not.toHaveBeenCalled()
 })
 const association = { owner: 'owner', localFileId: file.id, operationId: '22222222-2222-4222-8222-222222222222', generationOrigin: 'http://127.0.0.1:8900', taskId: '33333333-3333-4333-8333-333333333333', noteId: 'source-33333333-3333-4333-8333-333333333333', state: 'saved' as const }
+test('historical video remains listed without adding playback, export or generation and is never automatically deleted', async () => {
+  jest.mocked(listLocalFiles).mockResolvedValue([{ ...file, name: 'old.mp4', extension: 'mp4', category: 'video', purpose: 'note' }])
+  const view = await mount()
+  await act(async () => { press(view, '打开文件 old.mp4') })
+  expect(hostText(view)).toContain('历史视频')
+  expect(hostText(view)).toContain('此视频仅保留历史记录，视频功能请使用桌面端。')
+  expect(hostText(view)).not.toContain('当前可导出或删除')
+  for (const title of ['播放完整原视频', '导出文件', '再生成一份笔记', '生成总结笔记']) {
+    expect(view.root.findAll(node => node.props.title === title)).toHaveLength(0)
+  }
+  expect(deleteLocalFile).not.toHaveBeenCalled()
+  expect(exportLocalFile).not.toHaveBeenCalled()
+})
 test.each(['failed', 'saved', 'cancelled'] as const)('a late %s export cannot appear after switching files and reopening the same file', async outcome => {
   const second = { ...file, id: '44444444-4444-4444-8444-444444444444', name: 'second.docx' }
   jest.mocked(listLocalFiles).mockResolvedValue([file, second])
@@ -51,9 +64,9 @@ const hostText = (view: Renderer.ReactTestRenderer) => view.root
   })
   .join(' ')
 const press = (view: Renderer.ReactTestRenderer, label: string) => view.root.findAll(node => (node.props?.title === label || node.props?.accessibilityLabel === label) && typeof node.props?.onPress === 'function')[0].props.onPress()
-async function mount(onOpenNote = jest.fn()) {
+async function mount(onOpenNote = jest.fn(), category = 'all') {
   let view!: Renderer.ReactTestRenderer
-  await act(async () => { view = Renderer.create(<FileLibraryScreen view={{ purpose: 'note', category: 'all', query: '' }} onRecording={jest.fn()} onOpenNote={onOpenNote} onSummarize={jest.fn()} />) })
+  await act(async () => { view = Renderer.create(<FileLibraryScreen view={{ purpose: 'note', category, query: '' }} onRecording={jest.fn()} onOpenNote={onOpenNote} onSummarize={jest.fn()} />) })
   views.push(view); return view
 }
 beforeEach(() => {
@@ -141,32 +154,32 @@ test('purpose precedes format: note audio and meeting video never cross material
   expect(hostText(view)).toContain('会议录音')
   expect(hostText(view)).toContain('会议视频.mp4')
   expect(hostText(view)).not.toContain('笔记音频.wav')
-  await act(async () => { press(view, '视频') })
-  expect(hostText(view)).toContain('会议视频.mp4')
-  expect(hostText(view)).not.toContain('会议录音')
+  await act(async () => { press(view, '音频') })
+  expect(hostText(view)).not.toContain('会议视频.mp4')
+  expect(hostText(view)).toContain('会议录音')
 })
 
-test('format tabs are All/Audio/Video/Document; screen captures and imported video share Video with real source badges', async () => {
+test('only All/Audio/Document tabs remain; old video records are reachable in All without advertising capture', async () => {
   jest.mocked(listLocalFiles).mockResolvedValue([
     { ...file, id: 'capture', name: 'screen.mp4', category: 'video', extension: 'mp4', purpose: 'meeting', source: 'screen_recording' },
     { ...file, id: 'imported', name: 'imported.mp4', category: 'video', extension: 'mp4', purpose: 'meeting', source: 'import' },
   ])
   const view = await mount()
-  await act(async () => { press(view, '会议资料'); press(view, '视频') })
+  await act(async () => { press(view, '会议资料') })
   const tabs = view.root.findAll(node => node.props.accessibilityRole === 'tab' && typeof node.props.onPress === 'function').map(node => node.props.accessibilityLabel)
-  expect(tabs).toEqual(['会议资料', '笔记资料', '全部', '音频', '视频', '文档'])
+  expect(tabs).toEqual(['会议资料', '笔记资料', '全部', '音频', '文档'])
   expect(hostText(view)).toContain('screen.mp4')
   expect(hostText(view)).toContain('imported.mp4')
-  expect(hostText(view)).toContain('录屏')
-  expect(hostText(view)).toContain('导入视频')
+  expect(hostText(view)).toContain('历史视频')
+  expect(hostText(view)).not.toContain('录屏')
+  expect(hostText(view)).not.toContain('导入视频')
   expect(tabs).not.toContain('录屏')
 })
 
-test('an empty video filter never invents a screen-recording source or unsupported capture prompt', async () => {
-  const view = await mount()
-  await act(async () => { press(view, '视频') })
-  expect(view.root.findByType(FlatList).props.data).toHaveLength(0)
-  expect(hostText(view)).toContain('没有匹配文件')
+test.each(['video', 'screen'])('persisted %s filter becomes All instead of trapping old data behind a removed filter', async category => {
+  const view = await mount(jest.fn(), category)
+  expect(view.root.findByType(FlatList).props.data).toHaveLength(1)
+  expect(hostText(view)).toContain('source.docx')
   expect(hostText(view)).not.toContain('App 当前支持录音')
   expect(hostText(view)).not.toContain('导入视频')
 })

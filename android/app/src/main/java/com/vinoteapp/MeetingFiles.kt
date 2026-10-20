@@ -28,7 +28,7 @@ class MeetingFiles(private val context: ReactApplicationContext) : ReactContextB
       rejected()
       promise.reject("FILES_UNAVAILABLE", "文件操作已结束，请重新打开后重试；原文件保留")
     }
-    if (invalidated || !OriginalLifecycle.execute(worker, Runnable { if (invalidated) reject() else action() })) reject()
+    if (invalidated || !FileTaskDispatch.execute(worker, Runnable { if (invalidated) reject() else action() })) reject()
   }
   override fun getName() = "MeetingFiles"
   override fun getConstants(): MutableMap<String, Any> = mutableMapOf("bilibiliDownloadProtocol" to 1, "originalMediaProtocol" to 1)
@@ -47,25 +47,6 @@ class MeetingFiles(private val context: ReactApplicationContext) : ReactContextB
     }
   }
   @ReactMethod fun cancelOriginalExport() { context.runOnUiQueueThread { exporting?.cancelled?.set(true) } }
-  @ReactMethod fun closeOriginalPreview() {
-    // Revoke even when the old Intent has not reached Activity.onCreate yet.
-    OriginalVideoActivity.authority.revoke()
-    context.runOnUiQueueThread { OriginalVideoActivity.current?.let { if (!it.authorized()) it.finish() } }
-  }
-  @ReactMethod fun previewOriginal(uri: String, owner: String, seconds: Double, promise: Promise) {
-    if (invalidated) { promise.reject("ORIGINAL_PREVIEW", "文件操作已结束，请重新打开"); return }
-    val ticket = OriginalVideoActivity.authority.issue(owner)
-    context.runOnUiQueueThread {
-      try {
-        require(!invalidated && OriginalVideoActivity.authority.valid(ticket, owner))
-        val activity = requireNotNull(context.currentActivity)
-        val source = originalMedia(context, uri, owner)
-        require(source.extension.lowercase() in setOf("mp4", "mov", "mkv", "webm", "avi", "m4v") && seconds.isFinite() && seconds in 0.0..86400.0)
-        activity.startActivity(Intent(activity, OriginalVideoActivity::class.java).putExtra("uri", uri).putExtra("owner", owner).putExtra("ticket", ticket).putExtra("seconds", seconds))
-        promise.resolve(true)
-      } catch (_: Exception) { promise.reject("ORIGINAL_PREVIEW", "无法打开原视频，请核对格式或导出原件") }
-    }
-  }
   @ReactMethod fun addListener(name: String) {}
   @ReactMethod fun removeListeners(count: Double) {}
   @ReactMethod fun startBilibiliDownload(id: String, owner: String, url: String, maximum: Double, promise: Promise) {
@@ -133,7 +114,6 @@ class MeetingFiles(private val context: ReactApplicationContext) : ReactContextB
   }
   override fun invalidate() {
     invalidated = true
-    closeOriginalPreview()
     exporting?.cancelled?.set(true)
     synchronized(downloadLock) { download?.let { it.cancelled.set(true); it.downloader?.cancel() } }
     worker.shutdown(); super.invalidate()
@@ -180,6 +160,7 @@ class MeetingFiles(private val context: ReactApplicationContext) : ReactContextB
           context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) name = cursor.getString(0) ?: name
           }
+          require(!OriginalFilePolicy.video(name, context.contentResolver.getType(uri))) { "App 不支持导入视频，请在桌面端管理；未保留副本" }
           context.contentResolver.openInputStream(uri)?.use { source -> target.outputStream().use { output ->
             val buffer = ByteArray(65536)
             var total = 0L

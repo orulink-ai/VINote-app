@@ -1,4 +1,5 @@
 import { leaveClientIntake } from '../lib/noteIntake'
+import { isAppVideo } from '../lib/appFilePolicy'
 import { retryClientNote } from '../lib/clientNotePipeline'
 import { DetailDisclosure } from '../components/DetailDisclosure'
 import { BottomActionSheet } from '../components/BottomActionSheet'
@@ -171,6 +172,7 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
   }
   const start = () => {
     if (draft.uncertain || draft.operationId) void query.current()
+    else if (draft.mode === 'file' && draft.file && isAppVideo(draft.file)) setError('App 不支持处理视频文件，请在桌面端管理；历史文件未更改')
     else if (deviceBilibiliPath) saveDeviceAudio()
     else if (iosBilibiliBlocked) return
     else setNewConfirmation({ owner: owner.current, epoch: identityEpoch(), source: JSON.stringify(current.current) })

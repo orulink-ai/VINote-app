@@ -17,5 +17,6 @@ internal fun originalMedia(context: Context, uri: String, owner: String): File {
   val roots = listOf("files", "recordings").map { File(context.filesDir, "$it/accounts/${Uri.encode(owner)}") }
   require(roots.any { it.path == it.canonicalPath && source.parentFile == it })
   require(Regex("[a-zA-Z0-9-]+\\.[a-z0-9]{1,8}").matches(source.name))
+  require(OriginalFilePolicy.exportable(source.extension)) { "App 仅支持导出音频和文档，历史视频未更改" }
   return source
 }
