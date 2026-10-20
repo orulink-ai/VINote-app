@@ -1,4 +1,12 @@
+## App 工作路径规范（2026-10-20）
+
+App 开发、测试和文档维护统一在当前父仓库的 `VINote-app` 子模块内进行。除非用户明确要求，不再为 App 额外建立独立 worktree 或临时 workspace；保留当前子模块分支和未提交改动，不自行切换、重置或清理运行进程。历史独立目录的私有备份仅供取证，不作为活动源码工作区。
+
 ## 2026-10-20 最新 App 范围（覆写此前音视频会议建议）
+
+会议列表归组仅是展示：同一账号的已登记录音ID，或已保存且精确关联笔记的源文件ID，才可把多个内容对象折叠为同一会议。不得按标题/日期或未经原件验证的task_id猜测；来源缺失、读取失败或冲突保持各份可读，不做传递合并。先按项目/归档/搜索筛选各内容再归组，计数是纪要内容份数而非版本数。展开逐一打开原ID，原存储、版本和单份回收站行为不变，无整组删除/恢复；不恢复同步或推理。
+
+正文读取成功即显示独立可读行并结束loading，来源关联仅异步补充归组，不能阻塞正文或覆盖后续列表。每批正文携带读取时固定identity epoch，行/组handler捕获该批epoch，不能改成读取可变ref放行旧handler；同挂载身份变更后新批次可正常打开，旧批次和ABA迟到来源仍拒绝。
 
 录音与LocalFile导出都复用`originalMedia.exportOriginal`。`recordingLibrary.exportRecording`必须保留原录音校验并返回saved/cancelled；原URI、stat大小、扩展名MIME即可，禁止整文件JS/base64读取。`RecordingsScreen`的导出结果独立于phase，action finally清phase，录音详情/owner/identity epoch变更使旧结果与错误失效；不得把打开系统选择器当保存成功。相关反例见recordingExport与RecordingsScreen.export测试。
 

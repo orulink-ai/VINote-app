@@ -142,3 +142,29 @@
 - 本次只追加实机证据，不改源码、模型偏好、版本、workflow或署名纪要，不提交。此前离线276项/native测试与本节设备操作证据分别成立，不互相替代，也不构成全产品/正式发布放行。
 - 主线程随后实际读回确认：取消生成后仍为版本2；点击版本2正文重开正常。原音频显示总时长22:57，实际从0:00回听至0:25后暂停。由此关闭上项“版本2待读回”的待核实状态；未创建版本3、未换模型、未执行新生成。本代理仅记录主线程提供的结果，不宣称自行亲测，也不将25秒回听外推为全音频逐秒播放验收。
 - journal补充完成后文件冻结，交主线程提交docs并推送；本代理不提交、不修改代码、不触发candidate构建。
+
+### 2026-10-20｜App会议列表纯展示归组（新增授权阶段）
+
+- 用户在root 5174fe2 / App docs d297d03后授权继续同一App功能分支，只做展示归组；此前冻结由本次明确授权解除。本轮不改总结prompt、原生导出、版本号、workflow或生成链，不构建APK、不操作设备、不调用云/ASR/LLM、不提交。
+- 已读取UI root skill，经缓存CLI选择React Native best-practices，沿用现有FlatList虚拟列表和主题；实现前告知写集。新增`src/lib/meetingGroups.ts`纯helper及`meetingGroupSources.ts`只读来源解析，接线`NotesScreen.tsx`，新增2个测试文件、扩充NotesScreen测试并更新AGENTS本流程契约。
+- 来源证据限定当前owner与identity epoch：录音关联须task_id精确命中该账号现有录音记录；文件关联须命中该账号同一localFileId的saved笔记关联，兼容已存在的精确workspace/localIds映射。不得按标题、时间或任意task_id归组，不调用同步。多源冲突保持单独行，不进行传递合并；关联不可读退化为独立可读正文。
+- 先按每份内容的项目、归档和搜索过滤，再归组；多份内容显示“同一会议 · N份纪要”，默认折叠，展开后逐份打开原note ID。N是内容对象数而非历史版本数；单份保持旧行。原存储、完整历史稿与版本面板不动，没有整组回收/恢复动作；原有单份回收范围未扩大。账号变化清空显示证据与展开状态，拒绝旧行点击和迟到读取，包含ABA反例。笔记分类不额外读取原件关联。
+- Red阶段：先新增纯helper反例测试，因模块尚未实现而失败（不能将此描述为既有行为逐项失败）；随后实现并跑Green。实际Screen新增展开/精确打开旧稿、搜索/项目/归档不泄漏、关联失败保留稿件、ABA迟到结果及旧点击拒绝。来源测试覆盖未确认回执、错owner/错文件/无原件；纯helper覆盖同名同时间同task无证据、跨owner、非会议、冲突不串联、重复证据、deleted排除。
+- 离线验证：`node --require ./scripts/offline-network.cjs --max-old-space-size=384 node_modules/jest/bin/jest.js --runInBand --cacheDirectory artifacts/jest-cache --runTestsByPath __tests__/meetingGroups.test.ts __tests__/meetingGroupSources.test.ts __tests__/NotesScreen.test.tsx __tests__/notes.test.ts __tests__/notesListOwner.test.ts __tests__/noteSourceFiles.test.ts --silent`：6 suites/57 tests通过。额外同样入口运行NoteVersionsPanel和App.navigation：2 suites/17 tests通过，总计8 suites/74 tests。TypeScript `tsc --noEmit`通过，diff空白检查通过。
+- 此为源码/离线证据，未构建候选或进行新设备验收；不复用f8设备导出证据声称归组已实机通过。改动完成冻结，交主线程审查推送；本代理未commit/push。
+
+### 2026-10-20｜迁回父仓库App子模块后续验
+
+- 主线程完成迁移并提供8文件SHA及git diff binary前后一致的证据；本代理未执行迁移、reset、checkout或关闭Metro。新唯一源码路径为当前父仓库的`VINote-app`子模块，分支仍为`codex/app-meeting-ux-20261020`、HEAD仍为d297d03；旧独立目录为私有备份，不继续开发。
+- 按用户要求在AGENTS新增规范：以后统一在当前父仓库App子模块内开发测试，除非用户明确要求，不另建独立worktree或临时workspace。归组源码及测试沿用迁移前8文件改动，不重新实现或触及原生、版本、workflow；仅续跑相关离线测试和TypeScript，结果随后追加。
+- 新子模块路径实际复跑同上8个相关Jest suites：74 tests全部通过（10.339秒）；TypeScript `tsc --noEmit` exit0，diff空白检查通过。测试命令均已退出，无本代理活跃测试session。未构建APK、操作设备、调用云端或模型，未commit/push。此次仅追加工作路径规则及迁移续验记录，所有App文件重新冻结，交主线程review/commit/merge。
+
+### 2026-10-20｜独审两项P2修复与再次冻结
+
+- 接受独审结论：原screenIdentity只在挂载初始化，identity变化后同挂载重读虽显示新行却无法点击；原load等待逐文件来源关联，正文读取成功仍被来源耗时阻塞。此前74项离线通过未覆盖这两种行为，不撤改历史验证记录。
+- 先补行为反例并运行NotesScreen测试，实际3项失败：新身份成功重读的行无法打开、deferred来源导致正文仍为空、deferred失败前正文仍不可读。随后修复并保留Red证据，不将后补测试写成此前已覆盖。
+- 正文与读取identity epoch作为同一batch发布，每次渲染的行/组点击捕获该批固定epoch。新身份重读生成新batch可点击；旧handler不因可变ref更新而恢复授权。身份变更清空来源/展开/正文并使旧读取失效，允许同挂载的新读取独立进行，旧refresh结束不能覆盖新身份loading/error。
+- listNotes成功立即发布独立正文行和父级缓存并完成loading；来源只在后台then补充归组，异常保持独立正文。异步结果同时核验identity、proof epoch、load epoch和逐读取sourceRequest序号；换列表（包括同ID的新正文）、账号ABA、卸载均拒绝迟到来源，不重新发布正文或持久化任何归组结果。
+- 新增5个Screen回归：同挂载新行可打开且旧handler拒绝、deferred来源不阻塞且不能覆盖同ID的新列表、deferred失败不阻塞、当前来源可随后补归组而正文只发布一次、ABA后新行可打开且旧来源无效。原ABA/筛选/旧稿/owner及版本导航回归保留。
+- 同上8个相关Jest suites重新运行：79 tests全部通过（6.074秒）；TypeScript `tsc --noEmit` exit0，diff空白检查通过。仅在新父仓库VINote-app内修改Screen/tests及AGENTS/journal；没有存储写入或迁移逻辑、ASR/LLM/云调用、设备操作或构建。测试命令已退出，未commit/push，文件再次冻结交主线程独审。
+- 主线程提交前独立复跑同组79项全部通过（4.208秒）、TypeScript通过；只读复审确认上述两P2关闭、未发现新增P1/P2。准备正常功能分支提交及CI，后续候选安装/合并单独记录，不提前宣称此归组已在设备上验证。用户要求迁移完成并审查修复后正常合并，代码交付与仍待改进的自动总结评分分别记录。

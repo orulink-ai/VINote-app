@@ -12,6 +12,9 @@ import type { Note } from '../types/api'
 import { subscribeWorkspace } from '../lib/workspace'
 import { AsyncState } from '../components/AsyncState'
 import { ContentIntake } from '../components/ContentIntake'
+import { groupMeetings, isMeetingGroup, type MeetingRow } from '../lib/meetingGroups'
+import { readMeetingGroupSources } from '../lib/meetingGroupSources'
+import { identityEpoch, subscribeIdentity } from '../lib/sessionIdentity'
 
 /** Parent retains separate view snapshots per category; this contains no note data. */
 export type NotesView = { query: string; filter: string; project: string }
@@ -57,10 +60,14 @@ export function NotesScreen({
     if (!view) setLocalView(next)
     onViewChange?.(next)
   }
-  const [notes, setNotes] = useState<Note[]>(initialNotes ?? [])
+  const [batch, setBatch] = useState(() => ({ notes: initialNotes ?? [], epoch: identityEpoch() }))
+  const { notes, epoch: rowEpoch } = batch
   const [loading, setLoading] = useState(initialNotes === undefined)
   const [error, setError] = useState('')
+  const [sourceProof, setSourceProof] = useState<Awaited<ReturnType<typeof readMeetingGroupSources>>>()
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const loadEpoch = useRef(0)
+  const sourceRead = useRef(0)
   const refreshing = useRef(false)
   const readPending = useRef<Promise<void> | null>(null)
   const readAgain = useRef(false)
@@ -75,10 +82,21 @@ export function NotesScreen({
       do {
         readAgain.current = false
         try {
+          const sourceRequest = ++sourceRead.current
+          const identity = identityEpoch()
           const result = await listNotes()
+          if (identity !== identityEpoch()) return
           if (epoch !== loadEpoch.current) return
           hasCache.current = true
-          setNotes(result); setError(''); onRows.current?.(result)
+          setSourceProof(undefined)
+          setBatch({ notes: result, epoch: identity }); setError(''); onRows.current?.(result)
+          // Bodies are ready independently of original metadata. Only this exact
+          // list read may enrich its display, never a newer list or another identity.
+          if (kind !== 'note' && result.some(note => (note.source_type || '').startsWith('meeting'))) {
+            void readMeetingGroupSources(result).then(proof => {
+              if (identity === identityEpoch() && proof.epoch === identity && epoch === loadEpoch.current && sourceRequest === sourceRead.current) setSourceProof(proof)
+            }).catch(() => { /* Keep the independent complete bodies readable. */ })
+          }
         } catch (e) {
           if (epoch === loadEpoch.current) setError(e instanceof Error ? e.message : '加载失败，请重试')
         } finally {
@@ -89,25 +107,37 @@ export function NotesScreen({
     readPending.current = job
     void job.finally(() => { if (readPending.current === job) readPending.current = null })
     return job
-  }, [])
+  }, [kind])
   const refresh = useCallback(async () => {
     if (refreshing.current) return
+    const identity = identityEpoch()
     refreshing.current = true
     setLoading(true)
     try { await load() }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '读取失败，已保存内容仍可阅读') }
-    finally { refreshing.current = false; setLoading(false) }
+    catch (cause) { if (identity === identityEpoch()) setError(cause instanceof Error ? cause.message : '读取失败，已保存内容仍可阅读') }
+    finally { if (identity === identityEpoch()) { refreshing.current = false; setLoading(false) } }
   }, [load])
   React.useEffect(() => {
     void load()
     const unsubscribe = subscribeWorkspace(() => void load())
     return unsubscribe
   }, [load, revision])
-  React.useEffect(() => () => { ++loadEpoch.current }, [])
+  React.useEffect(() => () => { ++loadEpoch.current; ++sourceRead.current }, [])
+  React.useEffect(() => subscribeIdentity(() => {
+    ++loadEpoch.current; ++sourceRead.current
+    readPending.current = null; readAgain.current = false; hasCache.current = false
+    refreshing.current = false
+    setSourceProof(undefined); setExpanded(new Set()); setBatch({ notes: [], epoch: identityEpoch() }); setLoading(false); setError('')
+  }), [])
   const contentLabel = kind === 'meeting' ? '会议' : kind === 'note' ? '笔记' : '内容'
   const hasFilters = !!query.trim() || filter !== '全部' || (!initialProject && !!project)
   const clearFilters = () => updateView({ query: '', filter: '全部', project: initialProject })
   const projects = [...new Set(notes.map(note => note.project).filter((value): value is string => !!value))]
+  // Filter each content object first; expanding never reveals archived/project/search exclusions.
+  const visible = notes.filter(note => !note.deleted && (kind === 'all' || ((note.source_type || '').startsWith('meeting') ? kind === 'meeting' : kind === 'note'))).filter(note => !project || note.project === project).filter(note => (filter === '归档' ? note.archived : !note.archived) && (filter === '文字' ? ['text', 'file', 'document', 'transcript'].includes(note.source_type || '') : filter === '会议' ? (note.source_type || '').startsWith('meeting') : filter === '音视频' ? ['audio', 'video'].includes(note.source_type || '') : true)).filter(note => !query.trim() || (note.title + markdownPreview(note.content) + (note.tags || []).join(' ')).toLowerCase().includes(query.trim().toLowerCase()))
+  const grouped = sourceProof && sourceProof.epoch === identityEpoch() && kind !== 'note'
+    ? groupMeetings(visible, sourceProof.owner, sourceProof.sources) : visible
+  const rows: MeetingRow[] = grouped.flatMap(row => isMeetingGroup(row) && expanded.has(row.id) ? [row, ...row.notes] : [row])
   const filters = <View style={{ gap: 10, marginBottom: 12 }}><View style={{ gap: 6, paddingVertical: 8 }}>
     <Field hideLabel label={`搜索${contentLabel}`} value={query} onChangeText={value => updateView({ query: value })} placeholder="搜索标题、正文或标签" style={{ minHeight: 44, paddingVertical: 8, backgroundColor: colors.canvas }} />
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
@@ -133,11 +163,8 @@ export function NotesScreen({
           paddingBottom: 16,
           gap: 8,
         }}
-        data={notes.filter(note => kind === 'all' || ((note.source_type || '').startsWith('meeting') ? kind === 'meeting' : kind === 'note')).filter(note => !project || note.project === project).filter(note => (filter === '归档' ? note.archived : !note.archived) && (filter === '文字' ? ['text', 'file', 'document', 'transcript'].includes(note.source_type || '') : filter === '会议' ? (note.source_type || '').startsWith('meeting') : filter === '音视频' ? ['audio', 'video'].includes(note.source_type || '') : true)).filter(note =>
-          !query.trim() || (note.title + markdownPreview(note.content) + (note.tags || []).join(' '))
-            .toLowerCase()
-            .includes(query.trim().toLowerCase()),
-        )}
+        data={rows}
+        extraData={expanded}
         refreshing={loading}
         onRefresh={() => void refresh()}
         keyExtractor={item => item.id}
@@ -161,7 +188,16 @@ export function NotesScreen({
             </View>
           ) : undefined
         }
-        renderItem={({ item }) => (
+        renderItem={({ item }) => isMeetingGroup(item) ? (
+          <Pressable accessibilityRole="button" accessibilityState={{ expanded: expanded.has(item.id) }}
+            accessibilityLabel={`${item.notes[0].title.slice(0, 120)}，同一会议的${item.notes.length}份纪要，${expanded.has(item.id) ? '收起' : '展开'}`}
+            onPress={() => { if (rowEpoch !== identityEpoch()) return; setExpanded(current => { const next = new Set(current); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next }) }}
+            style={[styles.listRow, { padding: 14, borderRadius: 12, gap: 6, backgroundColor: colors.card, minHeight: 44 }]}>
+            <Text style={styles.eyebrow}>同一会议 · {item.notes.length}份纪要</Text>
+            <Text numberOfLines={2} style={styles.noteTitle}>{item.notes[0].title}</Text>
+            <Text style={styles.subtitle}>{expanded.has(item.id) ? '收起纪要' : '展开查看各份纪要'}</Text>
+          </Pressable>
+        ) : (
           <Pressable
             accessibilityRole="button"
             accessible
@@ -171,7 +207,7 @@ export function NotesScreen({
               { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 14 },
               { backgroundColor: pressed ? colors.primarySoft : colors.card },
             ]}
-            onPress={() => onOpen(item.id)}
+            onPress={() => { if (rowEpoch === identityEpoch()) onOpen(item.id) }}
           >
             <WorkspaceIcon name={(item.source_type || '').startsWith('meeting') ? 'record' : 'content'} muted />
             <View style={{ flex: 1, gap: 6 }}><View
