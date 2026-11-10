@@ -1,12 +1,13 @@
 import React from 'react'
 import Renderer, { act } from 'react-test-renderer'
 import { IntakeGenerationConfirmation } from '../src/components/IntakeGenerationConfirmation'
+import { Text } from '../src/components/AppText'
 import { transitionIdentity } from '../src/lib/sessionIdentity'
 import { loadSelection, loadModels } from '../src/lib/models'
 
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'alice') }))
 jest.mock('../src/lib/models', () => ({ loadModels: jest.fn(async () => [
-  { id: 'asr', modelType: 'asr', runtimeStatus: 'available' },
+  { id: 'asr', modelType: 'asr', runtimeStatus: 'available', capabilities: { recordedAudio: { protocol: 1, supported: true, strategy: 'single_request', policySource: 'provider_model' }, useCases: ['meeting'], protocols: ['asr-recording'], audioFormats: ['wav'], audioDelivery: 'public', speakerDiarization: true, utteranceTimestamps: true, maxAudioSeconds: 3600, maxAudioBytes: 100000000 } },
   { id: 'chosen', modelType: 'llm', runtimeStatus: 'available' },
 ]), loadSelection: jest.fn(async () => ({ asr_model: 'asr', llm_model: 'chosen' })) }))
 beforeEach(() => {
@@ -42,6 +43,20 @@ test('owner ABA invalidates an existing confirmation', async () => {
 test('text sources do not offer or require ASR', async () => {
   const c = await mount(false)
   expect(c.view.root.findAll(n => typeof n.type === 'string' && n.props.accessibilityRole === 'radio' && n.props.accessibilityState).length).toBe(1)
+  act(() => c.view.unmount())
+})
+test('audio notes hide streaming models and do not submit a saved streaming selection', async () => {
+  jest.mocked(loadModels).mockResolvedValueOnce([
+    { id: 'stream', modelType: 'asr', runtimeStatus: 'available', name: '流式识别' },
+    { id: 'file', modelType: 'asr', runtimeStatus: 'available', name: '录音文件识别', capabilities: { recordedAudio: { protocol: 1, supported: true, strategy: 'single_request', policySource: 'provider_model' }, useCases: ['meeting'], protocols: ['asr-recording'], audioFormats: ['wav'], audioDelivery: 'public', speakerDiarization: true, utteranceTimestamps: true, maxAudioSeconds: 3600, maxAudioBytes: 100000000 } },
+    { id: 'chosen', modelType: 'llm', runtimeStatus: 'available' },
+  ])
+  jest.mocked(loadSelection).mockResolvedValueOnce({ asr_model: 'stream', llm_model: 'chosen' })
+  const c = await mount()
+  const labels = c.view.root.findAllByType(Text).map(n => n.props.children).flat().join(' ')
+  expect(labels).toContain('录音文件识别')
+  expect(labels).not.toContain('流式识别')
+  expect(c.view.root.findAll(n => n.props.title === '确认模型并开始生成')[0].props.disabled).toBe(true)
   act(() => c.view.unmount())
 })
 test('catalog failure can be reread inside the same sheet without submitting or mutating a draft', async () => {

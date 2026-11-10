@@ -57,6 +57,24 @@ class MeetingAudioModule(private val context: ReactApplicationContext) : ReactCo
     // Conversion work finishes normally, then its old-context executor terminates.
   }
   override fun getName() = "MeetingAudio"
+  /** Verify the real audio track before sending a compressed recording. */
+  @ReactMethod
+  fun m4aInfo(uri: String, promise: Promise) { worker.execute {
+    val extractor = MediaExtractor()
+    try {
+      val file = File(Uri.parse(uri).path ?: uri).canonicalFile
+      require(file.path.startsWith(context.filesDir.canonicalPath + File.separator) && file.extension.equals("m4a", ignoreCase = true)) { "录音路径无效" }
+      extractor.setDataSource(file.path)
+      val tracks = (0 until extractor.trackCount).map { extractor.getTrackFormat(it) }
+      require(tracks.size == 1 && tracks.all { it.getString(MediaFormat.KEY_MIME) == "audio/mp4a-latm" }) { "录音包含其他媒体轨道，需提取音频" }
+      val track = tracks.single()
+      require(track.containsKey(MediaFormat.KEY_DURATION)) { "无法读取录音时长" }
+      val duration = track.getLong(MediaFormat.KEY_DURATION) / 1_000_000.0
+      require(duration.isFinite() && duration > 0) { "录音时长无效" }
+      promise.resolve(duration)
+    } catch (error: Exception) { promise.reject("AUDIO_INFO", error.message, error) }
+    finally { extractor.release() }
+  } }
   @ReactMethod
   fun audioInfo(uri: String, promise: Promise) { worker.execute {
     val retriever = MediaMetadataRetriever()

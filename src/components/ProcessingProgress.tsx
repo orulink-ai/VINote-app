@@ -12,9 +12,9 @@ export function ProcessingProgress({ label, percent, unknownLabel = '正在准�
       <Text style={styles.subtitle}>{label}</Text>
       {value === null ? <ActivityIndicator size="small" color={colors.navigationAccent} /> : <Text style={styles.subtitle}>{value}%</Text>}
     </View>
-    <View accessibilityRole="progressbar" accessibilityLabel={label} accessibilityValue={value === null ? undefined : { min: 0, max: 100, now: value }} style={{ height: 5, borderRadius: 3, overflow: 'hidden', backgroundColor: colors.line }}>
-      {value !== null && <View style={{ width: `${value}%`, height: '100%', backgroundColor: colors.navigationAccent }} />}
-    </View>
+    {value !== null && <View accessibilityRole="progressbar" accessibilityLabel={label} accessibilityValue={{ min: 0, max: 100, now: value }} style={{ height: 5, borderRadius: 3, overflow: 'hidden', backgroundColor: colors.line }}>
+      <View style={{ width: `${value}%`, height: '100%', backgroundColor: colors.navigationAccent }} />
+    </View>}
     {value === null && <Text style={styles.subtitle}>{unknownLabel}</Text>}
   </View>
 }

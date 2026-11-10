@@ -6,9 +6,9 @@ export const fontFamily = Platform.OS === 'ios' ? 'NotoSansSC-Regular' : 'VINote
 
 // Quiet, high-contrast surfaces inspired by assistant-ui Native's demo.
 export const colors = {
-  ink: '#202630', muted: '#626B78', subtle: '#646C78', line: '#E7EBF0',
-  canvas: '#F5F6F8', card: '#FFFFFF', primary: '#263344', onPrimary: '#FFFFFF', primarySoft: '#EAF0F7',
-  danger: '#BA4547', dangerSoft: '#FBECEE', success: '#257B67', successSoft: '#EAF5F0', navigationAccent: '#0969C7',
+  ink: '#1C1C1E', muted: '#63636A', subtle: '#81818A', line: '#E5E5EA',
+  canvas: '#F2F2F7', card: '#FFFFFF', primary: '#007AFF', onPrimary: '#FFFFFF', primarySoft: '#E8F2FF',
+  danger: '#C83D42', dangerSoft: '#FBECEE', success: '#247B64', successSoft: '#EAF5F0', navigationAccent: '#007AFF',
 }
 
 const makeStyles = () => StyleSheet.create({
@@ -16,7 +16,7 @@ const makeStyles = () => StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.canvas },
   content: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 24, gap: 14 },
   loginContent: { flexGrow: 1, paddingTop: 42, paddingBottom: 36 },
-  eyebrow: { color: colors.muted, fontFamily, fontSize: 11, fontWeight: '500', letterSpacing: 1.6 },
+  eyebrow: { color: colors.muted, fontFamily, fontSize: 11, fontWeight: '500', letterSpacing: 0.2 },
   title: { color: colors.ink, fontFamily, fontSize: 23, lineHeight: 31, fontWeight: '500', letterSpacing: -0.4 },
   subtitle: { color: colors.muted, fontFamily, fontSize: 13, lineHeight: 20 },
   label: { color: colors.ink, fontFamily, fontSize: 13, fontWeight: '500', marginBottom: 8 },
@@ -29,7 +29,7 @@ const makeStyles = () => StyleSheet.create({
   textButton: { minHeight: 44, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
   textButtonText: { color: colors.ink, fontFamily, fontSize: 14, lineHeight: 22, fontWeight: '500' },
   card: { backgroundColor: colors.card, shadowColor: '#101828', shadowOpacity: 0.035, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: colors.line, gap: 12 },
-  listRow: { backgroundColor: colors.card, borderBottomWidth: 1, borderColor: colors.line, paddingVertical: 16, gap: 10 },
+  listRow: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 15, gap: 10 },
   emptyState: { paddingVertical: 36, gap: 10 },
   pageTitle: { color: colors.ink, fontFamily, fontSize: 23, lineHeight: 31, fontWeight: '500' },
   noteTitle: { color: colors.ink, fontFamily, fontSize: 14, lineHeight: 21, fontWeight: '500' },
@@ -47,7 +47,7 @@ let revision = 0
 const listeners = new Set<() => void>()
 function applyAppearance() {
   const dark = mode === 'dark' || (mode === 'system' && Appearance.getColorScheme() === 'dark')
-  Object.assign(colors, dark ? { ink: '#E7ECF4', muted: '#A0ABBB', subtle: '#7E8A9D', line: '#303948', canvas: '#141A23', card: '#1C2430', primary: '#CEDAF0', onPrimary: '#172130', primarySoft: '#2A3749', danger: '#F19A9F', dangerSoft: '#42272E', success: '#7ED8BB', successSoft: '#1D3933', navigationAccent: '#80BFFF' } : light)
+  Object.assign(colors, dark ? { ink: '#F2F2F7', muted: '#A6A6AE', subtle: '#85858F', line: '#38383F', canvas: '#111114', card: '#222226', primary: '#0A84FF', onPrimary: '#FFFFFF', primarySoft: '#173655', danger: '#F19A9F', dangerSoft: '#42272E', success: '#7ED8BB', successSoft: '#1D3933', navigationAccent: '#66AEFF' } : light)
   styles = makeStyles(); revision++; listeners.forEach(listener => listener())
 }
 export function getAppearanceMode() { return mode }

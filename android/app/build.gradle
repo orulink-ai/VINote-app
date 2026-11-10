@@ -136,8 +136,9 @@ android {
         applicationId "com.vinoteapp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 9
-        versionName "0.1.4"
+        versionCode 16
+        versionName "0.1.11"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "String", "ACCOUNT_PROXY_HOST", groovy.json.JsonOutput.toJson(deployment.accountProxyHost)
         buildConfigField "int", "ACCOUNT_PROXY_PORT", deployment.accountProxyPort.toString()
         buildConfigField 'boolean', 'VINOTE_STANDALONE', project.hasProperty('vinoteStandalone') ? 'true' : 'false'
@@ -188,6 +189,9 @@ repositories {
     maven { url 'https://xdcobra.github.io/maven'; content { includeGroup 'com.xdcobra.sherpa' } }
 }
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
     implementation("com.xdcobra.sherpa:sherpa-onnx:1.12.35-1")
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")

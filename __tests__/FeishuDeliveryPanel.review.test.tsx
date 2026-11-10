@@ -33,6 +33,7 @@ const confirm = (view: Renderer.ReactTestRenderer) => view.root.findAllByType(Se
 const text = (view: Renderer.ReactTestRenderer) => view.root.findAll(node => typeof node.type === 'string' && String(node.type) === 'Text').flatMap(node => [node.props.children].flat(Infinity)).filter(value => typeof value === 'string' || typeof value === 'number').join(' ')
 beforeEach(async () => {
   for (const key of await Storage.getAllKeys()) await Storage.removeItem(key)
+  await Storage.setItem('vinote:owner:feishu-local-preferences', JSON.stringify({ notify_self: true, groups: ['g1', 'g2'], destination_config: { kind: 'folder', folder_token: 'folder' }, permission_policy: 'inherit' }))
   jest.clearAllMocks()
   jest.mocked(deliveryStatus).mockResolvedValue(null)
   jest.mocked(feishuApi).mockImplementation(async path => {
@@ -78,6 +79,7 @@ test('group failure leaves confirmation disabled and offers explicit reread with
   await act(async () => view.unmount())
 })
 test('no selected notifications states no sending and never loads a group directory', async () => {
+  await Storage.setItem('vinote:owner:feishu-local-preferences', JSON.stringify({ notify_self: false, groups: [], destination_config: { kind: 'personal' }, permission_policy: 'private' }))
   const api = jest.mocked(feishuApi).getMockImplementation()!
   jest.mocked(feishuApi).mockImplementation(async (path, ...args) => path === '/status' ? { publish_receipt_protocol: 1, recipient_access_protocol: 1, configured: true, connected: true, name: '用户甲', notify_self: false, groups: [], destination_config: { kind: 'personal' } } : api(path, ...args))
   let view!: Renderer.ReactTestRenderer

@@ -33,7 +33,7 @@ test.each(['deepseek-v4.1-flash', 'opaque-other-model'])('full long source and s
     expect(messages[0].content).not.toMatch(/逐段提取|合并重复事实/)
   }
   expect(jest.mocked(chatCompletion).mock.calls[1][1][1].content).toContain('# complete draft')
-  expect(state.save).toHaveBeenLastCalledWith(expect.objectContaining({ version: 11,
+  expect(state.save).toHaveBeenLastCalledWith(expect.objectContaining({ version: 13,
     source: evidence, model, parts: { draft: '# complete draft', audit: '# reviewed full note' } }))
   expect(analyze).not.toHaveBeenCalled(); expect(recognizeInterval).not.toHaveBeenCalled()
   expect(JSON.stringify(record)).toBe(before)

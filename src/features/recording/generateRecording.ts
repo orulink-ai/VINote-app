@@ -5,7 +5,6 @@ import { ASRServiceFailure, readASRDiagnostic } from '../../lib/asrFailure'
 import type { SpeakerProgress } from '../../lib/speakerProgress'
 import { modelEligible } from '../../lib/modelEligibility'
 import { createNote, getNote, nextNoteVersion, noteIdForVersion } from '../../lib/notes'
-import { queueAutomaticDelivery } from '../../lib/feishu'
 import { transcribe, summarize } from '../../lib/meetingCloud'
 import { analyzeSpeakers, meetingEvidence } from '../../lib/meetingSpeakers'
 import { createSerialQueue } from '../../lib/processingHelpers'
@@ -19,6 +18,12 @@ import { ApiError, TransportError } from '../../lib/errors'
 import { measure, ProcessingTiming } from '../../lib/processingHelpers'
 import { acquireGenerationSlot, acquireRecordingLock, reportGenerationProgress } from './recordingProcessing'
 import { prepareRecordingSummary, type SummaryRecoveryConfirmation } from './recordingSummaryRecovery'
+import { meetingFilePolicy } from '../../lib/meetingFilePolicy'
+import { prepareMeetingFile } from '../../lib/prepareMeetingFile'
+import { runPreparedMeetingFile } from '../../lib/meetingFileAdapter'
+import { operationId } from '../../lib/integration'
+import { API_BASE_URL } from '../../config/env'
+import { meetingFileEvidence } from '../../lib/meetingFileEvidence'
 export async function generateRecording(record: LocalRecording, onProgress: (text: string) => void, resume = false) {
   if (recordingASRBlocked(record)) throw new Error(RECORDING_ASR_BLOCKED)
   if (record.generation?.summaryOnly) throw new Error('请通过“仅生成纪要”确认总结模型后继续；不会重新转写或分析说话人')
@@ -76,7 +81,9 @@ export async function generateRecording(record: LocalRecording, onProgress: (tex
       await saveRecording(current)
     })
     // Keep successful branches even when the other fails; do not summarize early.
-    progress('转写与说话人分析同时进行…')
+    const selectedAsr = models.find(m => m.id === selection.asr_model && m.modelType === 'asr')
+    const useFile = !!current.meetingFilePrepared || (!!meetingFilePolicy(selectedAsr) && !current.transcriptionCheckpoint)
+    progress(useFile ? '正在准备会议录音…' : '转写与说话人分析同时进行…')
     let asrText = '正在准备'
     let speakerProgress = '正在准备'
     let transcriptionPercent: number | undefined
@@ -101,7 +108,33 @@ export async function generateRecording(record: LocalRecording, onProgress: (tex
           {
             // The checkpoint validates source and complete coverage. A nonempty
             // legacy string alone is never proof of full-recording recognition.
-            const transcript = await transcribe(record.uri, selection.asr_model, {
+            const asrModel = models.find(m => m.id === selection.asr_model && m.modelType === 'asr')
+            const filePolicy = meetingFilePolicy(asrModel)
+            if (current.meetingFilePrepared && current.transcriptionCheckpoint) throw new Error('录音存在多份不同的转写进度，请先核对原任务')
+            let transcript: string
+            if (useFile) {
+              const providerModel = asrModel?.providerModel
+              if (!providerModel) throw new Error('会议识别模型信息不完整，请刷新后重试')
+              let prepared = current.meetingFilePrepared
+              if (!prepared) {
+                if (!filePolicy) throw new Error('会议录音模型暂不可用，请稍后重试')
+                reportAnalysis('asr', '正在准备完整录音')
+                prepared = await prepareMeetingFile({ uri: record.uri, origin: API_BASE_URL.replace(/\/+$/, ''), owner, model: selection.asr_model, providerModel, id: operationId(), policy: filePolicy, guard })
+                await persist({ meetingFilePrepared: prepared })
+              }
+              const saved = prepared
+              if (saved.checkpoint.job.phase === 'created') reportAnalysis('asr', '正在上传完整录音，上传完成后自动转写')
+              let lastUploadPercent = -1
+              const checkpoint = await runPreparedMeetingFile(saved, {
+                owner, model: selection.asr_model, providerModel, origin: API_BASE_URL.replace(/\/+$/, ''), sourceUri: record.uri, guard,
+                save: next => persist({ meetingFilePrepared: { ...saved, checkpoint: next } }),
+                wait: () => new Promise(resolve => setTimeout(resolve, 3000)),
+                uploadProgress: percent => { if (percent !== lastUploadPercent) { lastUploadPercent = percent; reportAnalysis('asr', percent === 100 ? '上传完成，等待服务确认' : `正在上传录音 ${percent}%`) } },
+                progress: phase => reportAnalysis('asr', phase === 'submitted' ? '录音已提交，服务处理中' : '转写结果已保存'),
+              })
+              if (!checkpoint.result) throw new Error(checkpoint.job.phase === 'unknown' ? '会议转写结果尚未确认，请核对原任务' : '会议转写未完成，原录音和任务已保留')
+              transcript = checkpoint.result.text
+            } else transcript = await transcribe(record.uri, selection.asr_model, {
               recordedAudioPolicy: recordedAudioPolicy(models.find(m => m.id === selection.asr_model && m.modelType === 'asr')),
               checkpoint: current.transcriptionCheckpoint, asrProgress: value => { asrProgress = value }, progress: text => reportAnalysis('asr', text), guard, timing, owner,
               save: checkpoint => persist({ transcriptionCheckpoint: checkpoint }),
@@ -125,16 +158,19 @@ export async function generateRecording(record: LocalRecording, onProgress: (tex
         reportAnalysis('speaker', '失败，等待转写结果保存')
         throw cause
       })
-    {
+    if (useFile) {
+      reportAnalysis('speaker', '随会议转写一起处理')
+      await transcribeBranch()
+    } else {
       const analyses = await Promise.allSettled([transcribeBranch(), speakerBranch()])
       // Permanent failures need manual repair even if the other branch lost network.
       const failures = analyses.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       const failed = failures.find(result => !isTransient(result.reason)) || failures[0]
       if (failed?.status === 'rejected') throw failed.reason
     }
-    if (!current.speakerCheckpoint) throw new Error('说话人分析未保存，请重试；转写已保留')
-    progress('转写与说话人分析已保存，正在生成会议纪要…')
-    const evidence = meetingEvidence(current.transcript!, current.speakerCheckpoint, current.speakerAliases)
+    if (!useFile && !current.speakerCheckpoint) throw new Error('说话人分析未保存，请重试；转写已保留')
+    progress(useFile ? '正在生成会议纪要…' : '转写与说话人分析已保存，正在生成会议纪要…')
+    const evidence = useFile ? meetingFileEvidence(current.meetingFilePrepared!.checkpoint.result!) : meetingEvidence(current.transcript!, current.speakerCheckpoint!, current.speakerAliases)
     const content = await summarize(evidence, record.title, selection.llm_model, {
       checkpoint: current.summaryCheckpoint, progress, guard, timing, owner,
       save: checkpoint => persist({ summaryCheckpoint: checkpoint }),
@@ -142,13 +178,10 @@ export async function generateRecording(record: LocalRecording, onProgress: (tex
     await guard()
     const topic = summaryTopic(content)
     const noteTitle = recordingTitle(current.createdAt, topic || (current.titleSource === 'manual' ? current.title : '会议交流'))
-    if (current.titleSource === 'default' && topic) current = { ...current, title: noteTitle, titleSource: 'ai' }
     const note = await measure('note-save', () => createNote({ title: noteTitle, content, task_id: record.id }, owner, version), timing)
     timing({ stage: 'total', durationMs: Date.now() - started })
     await saveRecording({ ...current, noteId: note.id, lastNoteVersion: Math.max(current.lastNoteVersion || 0, version),
       llmModel: selection.llm_model, generation: undefined })
-    // Keep delivery errors independent from transcription/summary recovery.
-    void queueAutomaticDelivery(note, owner).catch(() => undefined)
     return note.id
   } catch (error) {
     timing({ stage: 'total', durationMs: Date.now() - started })
@@ -194,7 +227,7 @@ export async function generateRecordingSummary(confirmation: SummaryRecoveryConf
     if (prepared.evidenceKey !== confirmation.evidenceKey) throw new Error('原录音或完整结果已变化，请重新核对后确认')
     const record = prepared.record
     const continuing = record.generation?.summaryOnly?.evidenceKey === prepared.evidenceKey && record.generation.llmModel === confirmation.llmModel
-    const evidence = meetingEvidence(prepared.transcript, record.speakerCheckpoint!, record.speakerAliases)
+    const evidence = prepared.evidence || meetingEvidence(prepared.transcript, record.speakerCheckpoint!, record.speakerAliases)
     // Recover the durable note before catalog/token/model access. A completed
     // note and a failed recording metadata write must not become another LLM call.
     if (continuing) {
@@ -209,7 +242,7 @@ export async function generateRecordingSummary(confirmation: SummaryRecoveryConf
         const checkpoint = record.summaryCheckpoint
         if (savedNote.id !== noteId || savedNote.task_id !== record.id || savedNote.version !== version ||
             savedNote.status !== 'done' || savedNote.deleted || !savedNote.content?.trim() ||
-            checkpoint?.version !== 11 || checkpoint.model !== confirmation.llmModel ||
+            (checkpoint?.version !== 11 && checkpoint?.version !== 12 && checkpoint?.version !== 13) || checkpoint.model !== confirmation.llmModel ||
             checkpoint.title !== record.title || checkpoint.source !== evidence || checkpoint.parts.audit !== savedNote.content) {
           throw new Error('已保存纪要与本次模型或完整材料不匹配，未重新请求总结')
         }
@@ -229,7 +262,7 @@ export async function generateRecordingSummary(confirmation: SummaryRecoveryConf
     if (!Number.isInteger(version) || version < 1) throw new Error('纪要版本尚不能核验')
     current = { ...record, error: undefined, errorDetails: undefined,
       summaryCheckpoint: continuing ? record.summaryCheckpoint : undefined,
-      generation: { status: 'paused', asrModel: record.asrModel || record.transcriptionCheckpoint!.model,
+      generation: { status: 'paused', asrModel: record.asrModel || record.transcriptionCheckpoint?.model || record.meetingFilePrepared!.checkpoint.job.model,
         llmModel: confirmation.llmModel, startedAt: continuing ? record.generation!.startedAt : new Date().toISOString(),
         version, summaryOnly: { evidenceKey: prepared.evidenceKey } } }
     await guard(); await saveRecording(current)

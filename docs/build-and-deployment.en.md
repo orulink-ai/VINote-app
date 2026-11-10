@@ -14,7 +14,7 @@ Use one of the four Android commands below. Debug commands start Metro and insta
 
 ## Android packages
 
-VINote Test uses the LAN VILab at http://192.168.1.143:9876; VINote uses the public VILab at https://api.orulink.ai. Scripts select the matching profile. Both use the same Supabase account project; public builds have no LAN account proxy.
+VINote Test uses the LAN VILab at http://192.168.1.143:9876; VINote uses the public VILab at https://api-hk.orulink.ai. Scripts select the matching profile. Both use the same Supabase account project; public builds have no LAN account proxy.
 
 For direct Gradle builds select a channel first and pass `-PvinoteChannel=test` or `-PvinoteChannel=public`; public Debug requires the explicit public property. Build different channels sequentially because they share the generated deployment file and Metro state.
 

@@ -14,7 +14,7 @@ Node >=22.11；`npm ci` 使用锁文件安装。Android 使用 SDK/Build Tools 3
 
 ## Android 包
 
-VINote Test 使用内网 VILab http://192.168.1.143:9876；VINote 使用公网 VILab https://api.orulink.ai。脚本自动选择对应配置，两版可同时安装。账号认证仍使用同一 Supabase 项目，公网包不使用内网账号代理。
+VINote Test 使用内网 VILab http://192.168.1.143:9876；VINote 使用公网 VILab https://api-hk.orulink.ai。脚本自动选择对应配置，两版可同时安装。账号认证仍使用同一 Supabase 项目，公网包不使用内网账号代理。
 
 npm 脚本会自动选择对应配置。直接运行 Gradle 前需先选择通道，并传入 `-PvinoteChannel=test` 或 `-PvinoteChannel=public`；公网 Debug 必须显式传入 public。Babel 也执行配置校验。切换通道时请顺序构建，不要同时运行两个不同通道的 Metro/Gradle 任务。
 

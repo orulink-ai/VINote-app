@@ -85,7 +85,7 @@ export function FeishuDestinationPicker({ value, onChange, disabled, onChecked, 
     } catch (cause) { request.fail(cause) } finally { request.finish() }
   }
   return <View style={{ gap: 10 }}>
-    <Text style={styles.label}>文档位置</Text>
+    <Text style={[styles.label, { marginBottom: 0 }]}>文档位置</Text>
     <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{([{ kind: 'personal', label: '个人云文档' }, { kind: 'folder', label: '共享目录' }, { kind: 'wiki', label: '知识库' }] as const).map(item => <Pressable key={item.kind} accessibilityRole="radio" accessibilityLabel={item.label} accessibilityState={{ checked: value.kind === item.kind, disabled: !!disabled || busy }} disabled={disabled || busy} onPress={() => { if (value.kind !== item.kind) { setItems([]); setCursor(''); setBrowseTarget(null); setHistory([]); setBrowseFailure(null); setLoaded(false); change({ kind: item.kind }) } }} style={{ minHeight: 48, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: value.kind === item.kind ? colors.ink : colors.line, backgroundColor: value.kind === item.kind ? colors.primarySoft : colors.card }}><Text style={styles.subtitle}>{item.label}</Text></Pressable>)}</View>
     {value.kind === 'folder' && <Field label="文件夹 token" value={value.folder_token || ''} onChangeText={folder_token => change({ kind: 'folder', folder_token })} editable={!disabled && !busy} />}
     {value.kind === 'wiki' && <><Field label="知识空间 ID" value={value.space_id || ''} onChangeText={space_id => change({ ...value, space_id })} editable={!disabled && !busy} /><Field label="父节点 token" value={value.node_token || ''} onChangeText={node_token => change({ ...value, node_token })} editable={!disabled && !busy} /></>}
@@ -94,7 +94,7 @@ export function FeishuDestinationPicker({ value, onChange, disabled, onChecked, 
     {loaded && !items.length && !error && <Text style={styles.subtitle}>{cursor ? '当前页没有可见位置，请继续读取下一页。' : '此处没有可见位置，可返回上级或填写已知标识。'}</Text>}
     {items.map(item => <View key={`${item.kind}:${item.folder_token || item.space_id}:${item.node_token || ''}`} style={styles.listRow}><Text style={styles.noteTitle}>{item.name}</Text>{(item.kind === 'folder' || !!item.node_token) && <PrimaryButton secondary title="选择此位置" disabled={disabled || busy} onPress={() => change(item.kind === 'folder' ? { kind: 'folder', folder_token: item.folder_token } : { kind: 'wiki', space_id: item.space_id, node_token: item.node_token })} />}{item.kind === 'folder' || item.has_child ? <PrimaryButton tertiary title="进入子目录" disabled={busy || disabled} onPress={() => void browse(item)} /> : null}</View>)}
     {!!cursor && browseTarget && <PrimaryButton secondary title="继续读取下一页" disabled={busy || disabled} onPress={() => void browse(browseTarget, cursor)} />}
-    <Text style={styles.subtitle}>{value.kind === 'personal' ? '关闭链接及组织外分享；组织内部访问遵循飞书策略，通知接收人的阅读权限另行核验。' : '沿用目标位置权限。可见目录不代表能写入，请先核验；写入结果以实际发布为准。'}</Text>
+    <Text style={styles.subtitle}>{value.kind === 'personal' ? '文档保存在个人云文档，访问权限遵循飞书设置。' : '文档沿用目标位置权限；请先核验是否可写入。'}</Text>
     {showCheck && <PrimaryButton secondary title="核验位置与权限" disabled={disabled || busy} loading={busy} onPress={() => void check()} />}
     {!!verified && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>{verified}</Text>}<AsyncState error={error} retryLabel="重新读取此位置" onRetry={browseFailure ? () => void browse(browseFailure.target, browseFailure.pageToken, browseFailure.remember) : undefined} />
   </View>

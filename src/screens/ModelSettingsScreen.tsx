@@ -8,7 +8,7 @@ import { styles } from '../design-system/theme'
 export function ModelSettingsScreen({ onBack }: { onBack: () => void }) {
   const ready = useCallback(() => {}, [])
   return <View style={styles.screen}>
-    <ScreenHeader title="转写与总结" onBack={onBack} backLabel="返回我的" />
+    <ScreenHeader title="转写与总结" onBack={onBack} backLabel="返回设置" />
     <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
       <Text style={styles.subtitle}>选择下一次处理使用的服务。正在生成的内容继续使用启动时的模型。</Text>
       <View style={styles.card}><CloudModelPicker disabled={false} onReady={ready} /></View>

@@ -4,12 +4,29 @@ import { FeishuDeliveryPanel } from '../src/components/FeishuDeliveryPanel'
 import { PrimaryButton } from '../src/components/PrimaryButton'
 import { deliveryStatus, publishToFeishu, feishuApi } from '../src/lib/feishu'
 import { SettingsCheckbox } from '../src/components/SettingsCheckbox'
+import { readFeishuLocalPreferencesState } from '../src/lib/feishuLocalPreferences'
 import type { Note } from '../src/types/api'
 
 jest.mock('../src/lib/feishu', () => ({ newSnapshotPublishOptions: jest.requireActual('../src/lib/feishu').newSnapshotPublishOptions, feishuPublishBody: jest.requireActual('../src/lib/feishu').feishuPublishBody, feishuContacts: jest.fn(), contactsValid: (items: any[]) => items.every(item => !!item.name && item.expiresAt > Date.now()), contactRecipients: (items: any[]) => items.map(({ open_id, selection_token }) => ({ open_id, selection_token })), feishuApi: jest.fn(), deliveryStatus: jest.fn(), assertFeishuPublishReady: jest.fn(async () => {}), publishToFeishu: jest.fn(), retryDelivery: jest.fn(), recoverDeliveryDocument: jest.fn() }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
+jest.mock('../src/lib/feishuLocalPreferences', () => ({ readFeishuLocalPreferencesState: jest.fn(async () => ({ exists: true, preferences: { destination_config: { kind: 'personal' }, permission_policy: 'private', notify_self: false, groups: [] } })) }))
 afterEach(() => jest.clearAllMocks())
 const note = { id: 'note-1', title: '会议', content: '# 纪要' } as Note
+
+test('warns before publishing with unsaved device defaults', async () => {
+  jest.mocked(readFeishuLocalPreferencesState).mockResolvedValue({ exists: false, preferences: { destination_config: { kind: 'personal' }, permission_policy: 'private', notify_self: false, groups: [] } })
+  jest.mocked(feishuApi).mockImplementation(async path => path === '/status' ? { publish_receipt_protocol: 1, recipient_access_protocol: 1, configured: true, connected: true, expired: false, notify_self: false, groups: [] } : { name: '个人云文档', path: ['个人云文档'], path_complete: true, can_create: true, can_attempt_create: true })
+  jest.mocked(deliveryStatus).mockResolvedValueOnce(null)
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<FeishuDeliveryPanel note={note} />) })
+  expect(JSON.stringify(view.toJSON())).toContain('旧设备或旧版设置不会自动同步')
+  expect(publishToFeishu).not.toHaveBeenCalled()
+  await act(async () => view.unmount())
+  await act(async () => { view = Renderer.create(<FeishuDeliveryPanel note={note} />) })
+  expect(JSON.stringify(view.toJSON())).toContain('旧设备或旧版设置不会自动同步')
+  await act(async () => view.unmount())
+  jest.mocked(readFeishuLocalPreferencesState).mockResolvedValue({ exists: true, preferences: { destination_config: { kind: 'personal' }, permission_policy: 'private', notify_self: false, groups: [] } })
+})
 
 test('cannot publish before status is read, and retry recovers a failed read', async () => {
   jest.mocked(feishuApi).mockImplementation(async path => path === '/status' ? { publish_receipt_protocol: 1, recipient_access_protocol: 1, configured: true, connected: true, expired: false, notify_self: false, groups: [] } : { name: '个人云文档', path: ['个人云文档'], path_complete: true, can_create: true, can_attempt_create: true })

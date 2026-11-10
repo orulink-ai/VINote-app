@@ -10,7 +10,6 @@ import {
   Linking,
   Pressable,
   ScrollView,
-  Switch,
   TextInput,
   View,
 } from 'react-native'
@@ -23,9 +22,13 @@ import { PrimaryButton } from '../components/PrimaryButton'
 import { colors, styles } from '../design-system/theme'
 import { FeishuApplicationSetup } from '../components/FeishuApplicationSetup'
 import { FeishuDestinationPicker } from '../components/FeishuDestinationPicker'
+import { readAccountId } from '../lib/storage'
+import { readFeishuLocalPreferencesState, saveFeishuLocalPreferences } from '../lib/feishuLocalPreferences'
+import { identityEpoch, subscribeIdentity } from '../lib/sessionIdentity'
 
-export function FeishuSettingsScreen({ onBack }: {
+export function FeishuSettingsScreen({ onBack, navigationGuard }: {
   onBack: () => void
+  navigationGuard?: React.MutableRefObject<((destination: () => void) => void) | undefined>
 }) {
   const [value, setValue] = useState<FeishuStatus | null>(null)
   const verificationUnavailable = feishuVerificationUnavailable(value)
@@ -41,18 +44,31 @@ export function FeishuSettingsScreen({ onBack }: {
   const [authUrl, setAuthUrl] = useState('')
   const [authorization, setAuthorization] = useState<FeishuAuthorization | null>(null)
   const [authExpired, setAuthExpired] = useState(false)
+  const [connectionExpanded, setConnectionExpanded] = useState(false)
+  const [localDefaults, setLocalDefaults] = useState(false)
+  const draftScope = useRef<{ owner: string; epoch: number } | null>(null)
+  const section = { backgroundColor: colors.card, paddingHorizontal: 14, paddingVertical: 12, gap: 8, borderRadius: 12 } as const
   const load = async (preserveDraft = true) => {
+    const epoch = identityEpoch()
     setBusy(true)
     setError('')
     setSaveFailed(false)
     try {
-      const next = await feishuApi<FeishuStatus>('/status')
-      setValue(current => dirty && preserveDraft && current ? { ...next, notify_self: current.notify_self, groups: current.groups, auto_publish: current.auto_publish, destination_config: current.destination_config, permission_policy: current.permission_policy } : next)
+      const owner = await readAccountId()
+      if (!owner) throw new Error('请重新登录')
+      const status = await feishuApi<FeishuStatus>('/status', {}, owner)
+      const local = await readFeishuLocalPreferencesState(owner)
+      const next = { ...status, ...local.preferences, auto_publish: false }
+      if (identityEpoch() !== epoch || await readAccountId() !== owner || identityEpoch() !== epoch) return false
+      const sameDraft = draftScope.current?.owner === owner && draftScope.current?.epoch === epoch
+      draftScope.current = { owner, epoch }
+      setLocalDefaults(!local.exists)
+      setValue(current => dirty && preserveDraft && sameDraft && current ? { ...next, notify_self: current.notify_self, groups: current.groups, auto_publish: current.auto_publish, destination_config: current.destination_config, permission_policy: current.permission_policy } : next)
       if (!preserveDraft || !dirty) setDirty(false)
       setGroupError('')
       if (next.connected && !next.expired && !feishuVerificationUnavailable(next)) {
-        try { setGroups(await feishuApi<FeishuGroup[]>('/groups')) }
-        catch (cause) { setGroupError((cause as Error).message) }
+        try { const found = await feishuApi<FeishuGroup[]>('/groups', {}, owner); if (identityEpoch() !== epoch || await readAccountId() !== owner || identityEpoch() !== epoch) return false; setGroups(found) }
+        catch (cause) { if (identityEpoch() !== epoch) return false; setGroupError((cause as Error).message) }
         if (authUrl) {
           setAuthUrl('')
           setAuthorization(null)
@@ -64,6 +80,7 @@ export function FeishuSettingsScreen({ onBack }: {
       }
       return true
     } catch (cause) {
+      if (identityEpoch() !== epoch) return false
       if ((cause as { code?: string }).code === 'FEISHU_NOT_CONFIGURED') {
         setValue({ configured: false, connected: false, expired: false, name: '', notify_self: true, groups: [], auto_publish: false })
         return false
@@ -71,12 +88,17 @@ export function FeishuSettingsScreen({ onBack }: {
       setError((cause as Error).message)
       return false
     } finally {
-      setBusy(false)
+      if (identityEpoch() === epoch) setBusy(false)
     }
   }
   useEffect(() => {
     void load()
   }, [])
+  useEffect(() => subscribeIdentity(() => {
+    draftScope.current = null
+    setValue(null); setGroups([]); setGroupPicker(false); setDirty(false); setBusy(false); setLocalDefaults(false)
+    setAuthUrl(''); setAuthorization(null); setMessage(''); setError('账号已切换，请重新打开飞书设置。')
+  }), [])
   const loadRef = useRef(load)
   loadRef.current = load
   useEffect(() => {
@@ -98,6 +120,11 @@ export function FeishuSettingsScreen({ onBack }: {
         ])
       : destination()
   const back = () => leave(onBack)
+  useEffect(() => {
+    if (!navigationGuard) return
+    navigationGuard.current = leave
+    return () => { navigationGuard.current = undefined }
+  }, [dirty, navigationGuard])
   useEffect(() => {
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
       back()
@@ -149,7 +176,7 @@ export function FeishuSettingsScreen({ onBack }: {
         {busy && !value ? <ActivityIndicator color={colors.ink} /> : null}
         {value && !value.configured ? <View style={styles.card}><Text style={styles.noteTitle} accessibilityRole="alert">授权服务尚未就绪</Text><Text style={styles.subtitle}>当前无法生成有效的授权链接，笔记和会议纪要仍可正常保存。尚缺：{(value.setup?.missing || ['application']).map(key => ({ application: 'VINote 企业应用', callback: '授权回调', organization: '公司绑定', documents: '云文档地址', encryption: '授权存储配置' } as Record<string, string>)[key] || '服务配置').join('、')}。</Text><PrimaryButton secondary title="重新检查接入" loading={busy} onPress={() => void load()} /></View> : null}
         <View
-          style={styles.card}
+          style={section}
         >
           <Text style={styles.noteTitle}>账号连接</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -161,6 +188,21 @@ export function FeishuSettingsScreen({ onBack }: {
               授权已过期，请重新连接后恢复交付。
             </Text>
           ) : null}
+          {value?.connected && !verificationUnavailable && <Pressable accessibilityRole="button" accessibilityLabel="管理连接" accessibilityState={{ expanded: connectionExpanded }} onPress={() => setConnectionExpanded(current => !current)} style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={styles.subtitle}>管理连接</Text><Text style={styles.subtitle}>{connectionExpanded ? '收起' : '›'}</Text></Pressable>}
+          {value && (!value.connected || verificationUnavailable || connectionExpanded) && <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
+          {value?.connected ? <PrimaryButton
+            tertiary title="断开连接" disabled={busy}
+            style={{ minHeight: 44, paddingHorizontal: 14 }}
+            onPress={() => Alert.alert('断开飞书？', '停止后续交付，已创建文档继续保留。', [
+              { text: '取消' },
+              { text: '断开', onPress: async () => {
+                setBusy(true)
+                try { await feishuApi('/connection', { method: 'DELETE' }); await load(false) }
+                catch (cause) { setError((cause as Error).message) }
+                finally { setBusy(false) }
+              } },
+            ])}
+          /> : null}
           <PrimaryButton
             style={{ alignSelf: 'flex-end', minHeight: 44, paddingHorizontal: 14 }}
             secondary={!!value?.connected}
@@ -187,6 +229,7 @@ export function FeishuSettingsScreen({ onBack }: {
               }
             }}
           />
+          </View>}
           {verificationUnavailable && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>{feishuVerificationMessage}</Text>}
           {authUrl ? (
             <>
@@ -212,83 +255,32 @@ export function FeishuSettingsScreen({ onBack }: {
               />
             </>
           ) : null}
-          {value?.connected ? (
-            <PrimaryButton
-              tertiary
-              style={{ alignSelf: 'flex-end', minHeight: 44, paddingHorizontal: 14 }}
-              title="断开连接"
-              disabled={busy}
-              onPress={() =>
-                Alert.alert(
-                  '断开飞书？',
-                  '停止后续交付，已创建文档继续保留。',
-                  [
-                    { text: '取消' },
-                    {
-                      text: '断开',
-                      onPress: async () => {
-                        setBusy(true)
-                        try {
-                          await feishuApi('/connection', { method: 'DELETE' })
-                          await load(false)
-                        } catch (cause) {
-                          setError((cause as Error).message)
-                        } finally {
-                          setBusy(false)
-                        }
-                      },
-                    },
-                  ],
-                )
-              }
-            />
-          ) : null}
         </View>
-        <View
-          style={styles.card}
+        {value && <View
+          style={section}
         >
+          {localDefaults && <Text accessibilityRole="alert" style={styles.subtitle}>本机尚未保存飞书设置，当前使用个人云文档和本人通知的默认值；旧设备或旧版设置不会自动同步，请核对后保存。</Text>}
           <FeishuDestinationPicker value={value?.destination_config || { kind: 'personal' }} disabled={!!disabled} onChange={destination_config => change({ destination_config, permission_policy: destination_config.kind === 'personal' ? 'private' : 'inherit' })} />
-        </View>
-        <View
-          style={styles.card}
+        </View>}
+        {value && <View
+          style={section}
         >
           <Text style={styles.noteTitle}>机器人通知</Text>
+          {disabled && <Text style={styles.subtitle}>{busy ? '正在更新飞书状态…' : verificationUnavailable ? '暂时无法核验飞书连接，请检查网络后重试。' : value?.expired ? '重新连接飞书后可修改通知对象。' : '连接飞书后可修改通知对象。'}</Text>}
           <SettingsCheckbox label="发给我本人" disabled={!!disabled} checked={value?.notify_self ?? true} onChange={checked => change({ notify_self: checked })} />
           <SettingsCheckbox label="发给指定群" disabled={!!disabled} checked={!!value?.groups.length} onChange={checked => checked ? setGroupPicker(true) : change({ groups: [] })} />
-          <Pressable accessibilityRole="button" accessibilityLabel="选择通知群" disabled={!!disabled} onPress={() => setGroupPicker(true)} style={{ minHeight: 44, borderWidth: 1, borderColor: colors.line, borderRadius: 7, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: disabled ? 0.45 : 1 }}>
+          {!!value?.groups.length && <Pressable accessibilityRole="button" accessibilityLabel="选择通知群" disabled={!!disabled} onPress={() => setGroupPicker(true)} style={{ minHeight: 44, borderWidth: 1, borderColor: colors.line, borderRadius: 7, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: disabled ? 0.45 : 1 }}>
             <Text style={[styles.noteBody, { flex: 1 }]} numberOfLines={1}>{value?.groups.length ? value.groups.map(id => groups.find(group => group.chat_id === id)?.name || '已选群').join('、') : '选择通知群'}</Text><WorkspaceIcon name="chevron" muted />
-          </Pressable>
-          <Text style={styles.subtitle}>
+          </Pressable>}
+          {!!value?.groups.length && <Text style={styles.subtitle}>
             仅显示你和机器人共同加入的群；交付时校验文档阅读权限。
-          </Text>
+          </Text>}
           {groupError ? <PrimaryButton tertiary style={{ alignSelf: 'flex-start' }} title="刷新群列表" disabled={!!disabled} loading={busy} onPress={() => void refreshGroups()} /> : null}
           {groupError ? <Text accessibilityRole="alert" style={{ color: colors.danger }}>{groupError}，已选群继续保留，请重试刷新。</Text> : null}
-        </View>
-        <View
-          style={styles.card}
-        >
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <Text style={styles.noteTitle}>自动交付新纪要</Text>
-            <Switch
-              accessibilityLabel="自动交付新纪要"
-              disabled={!!disabled || !value?.capabilities?.background_delivery}
-              value={value?.auto_publish ?? false}
-              onValueChange={checked => change({ auto_publish: checked })}
-            />
-          </View>
-          <Text style={styles.subtitle}>
-            {!value || verificationUnavailable ? '后台交付能力尚未核验，请先重新读取连接状态。' : value.capabilities?.background_delivery ? '首次完成版本自动发布；之后修改需手动发布。' : '当前服务未启用持续后台交付，请从内容详情发布到飞书。'}
-          </Text>
-        </View>
+        </View>}
         <FeishuApplicationSetup onChanged={() => void load(false)} />
       </ScrollView>
-      <View
+      {(dirty || localDefaults) && <View
         style={{
           padding: 20,
           gap: 10,
@@ -300,31 +292,25 @@ export function FeishuSettingsScreen({ onBack }: {
         }}
       >
         <Text accessibilityLiveRegion="polite" style={[styles.subtitle, { flex: 1 }]}>
-          {saveFailed && dirty ? '保存失败，修改已保留，请重试保存。' : error && dirty ? '操作未完成，未保存修改仍保留。' : message || (dirty ? '有未保存修改' : '设置按 VINote 账号共享')}
+          {saveFailed ? '保存失败，请重试保存。' : error && dirty ? '操作未完成，未保存修改仍保留。' : message || (dirty ? '有未保存修改' : '请核对并保存本机设置')}
         </Text>
         <PrimaryButton
           style={{ minHeight: 44, paddingHorizontal: 14 }}
-          title={saveFailed && dirty ? '重试保存' : '保存设置'}
+          title={saveFailed ? '重试保存' : '保存设置'}
           loading={busy}
-          disabled={!!disabled || !dirty}
+          disabled={!!disabled || (!dirty && !localDefaults)}
           onPress={async () => {
             if (!value) return
             setBusy(true)
             setError('')
             setSaveFailed(false)
             try {
-              setValue(
-                await feishuApi<FeishuStatus>('/preferences', {
-                  method: 'PUT',
-                  body: JSON.stringify({
-                    notify_self: value.notify_self,
-                    groups: value.groups,
-                    auto_publish: value.auto_publish,
-                    destination_config: value.destination_config || { kind: 'personal' },
-                    permission_policy: value.permission_policy || 'private',
-                  }),
-                }),
-              )
+              const scope = draftScope.current
+              const owner = await readAccountId()
+              if (!owner) throw new Error('请重新登录')
+              if (!scope || scope.owner !== owner || scope.epoch !== identityEpoch()) throw new Error('账号已切换，请重新打开飞书设置')
+              await saveFeishuLocalPreferences(owner, { notify_self: value.notify_self, groups: value.groups, destination_config: value.destination_config || { kind: 'personal' }, permission_policy: value.permission_policy || 'private' })
+              setLocalDefaults(false)
               setDirty(false)
               setMessage('设置已保存')
             } catch (cause) {
@@ -335,7 +321,7 @@ export function FeishuSettingsScreen({ onBack }: {
             }
           }}
         />
-      </View>
+      </View>}
       <BottomActionSheet
         visible={groupPicker}
         title="选择通知群"

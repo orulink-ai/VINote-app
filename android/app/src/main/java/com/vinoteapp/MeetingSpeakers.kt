@@ -100,20 +100,9 @@ class MeetingSpeakers(private val context: ReactApplicationContext) : ReactConte
       )
       engine = OfflineSpeakerDiarization(context.assets, config)
       require(engine.sampleRate() == 16000) { "说话人模型采样率异常" }
-      var previous = -1
-      // JNI looks up the primitive-argument invoke method. Kotlin 2's indy
-      // lambda exposes only its erased SAM bridge, so use an explicit object.
-      val callback = object : Function3<Int, Int, Long, Int> {
-        override fun invoke(done: Int, total: Int, userData: Long): Int {
-          val percent = (done * 100 / maxOf(total, 1)) / 5 * 5
-          if (percent != previous) {
-            previous = percent
-            context.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java).emit("meetingSpeakerProgress", Arguments.createMap().apply { putString("jobId", jobId); putInt("progress", percent) })
-          }
-          return 0
-        }
-      }
-      val segments = engine.processWithCallback(samples, callback, 0).sortedBy { it.start }
+      // Avoid the JNI callback path: it has crashed on real devices. Progress is
+      // reported per bounded window by the caller, not as an invented percentage.
+      val segments = engine.process(samples).sortedBy { it.start }
       // A quiet window is valid; only JS checks whether the entire recording
       // has any detected speech after all windows have been preserved.
       val turns = Arguments.createArray()

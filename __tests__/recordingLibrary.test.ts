@@ -2,11 +2,36 @@ import FS from 'react-native-fs'
 import { readAccountId } from '../src/lib/storage'
 import { recordingPath, saveRecording, listRecordings, createRecordingDraft, finalizeRecording, importRecording, unlinkRecordingNote, deleteRecording, renameRecording } from '../src/features/recording/recordingLibrary'
 import { acquireRecordingLock } from '../src/features/recording/recordingProcessing'
-import { listNotes } from '../src/lib/notes'
+import { listNotes, setNoteDeleted } from '../src/lib/notes'
 import { NativeModules } from 'react-native'
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn() }))
-jest.mock('../src/lib/notes', () => ({ listNotes: jest.fn(async () => []) }))
-beforeEach(() => { jest.clearAllMocks(); jest.mocked(FS.exists).mockResolvedValue(false) })
+jest.mock('../src/lib/notes', () => ({ listNotes: jest.fn(async () => []), setNoteDeleted: jest.fn(async () => {}) }))
+beforeEach(() => { jest.clearAllMocks(); jest.mocked(FS.exists).mockResolvedValue(false); jest.mocked(listNotes).mockResolvedValue([]) })
+
+test('deleting a meeting trashes its linked notes before removing the original', async () => {
+  jest.mocked(readAccountId).mockResolvedValue('alice')
+  jest.mocked(FS.exists).mockResolvedValue(true)
+  jest.mocked(FS.readDir).mockResolvedValue([{ name: 'one.json', path: '/metadata/one.json' }] as never)
+  const record = { id: 'one', uri: 'file:///documents/recordings/accounts/alice/one.m4a', title: '会议', createdAt: '', duration: 10, noteId: 'note-one' }
+  jest.mocked(FS.readFile).mockResolvedValue(JSON.stringify(record))
+  jest.mocked(listNotes).mockResolvedValue([{ id: 'note-one', task_id: 'one' }, { id: 'other', task_id: 'another' }] as never)
+  await deleteRecording(record)
+  expect(setNoteDeleted).toHaveBeenCalledWith('note-one', true, 'alice')
+  expect(setNoteDeleted).not.toHaveBeenCalledWith('other', true, 'alice')
+  expect(jest.mocked(setNoteDeleted).mock.invocationCallOrder[0]).toBeLessThan(jest.mocked(FS.unlink).mock.invocationCallOrder[0])
+})
+
+test('keeps the recording if a linked note cannot be moved to trash', async () => {
+  jest.mocked(readAccountId).mockResolvedValue('alice')
+  jest.mocked(FS.exists).mockResolvedValue(true)
+  jest.mocked(FS.readDir).mockResolvedValue([{ name: 'one.json', path: '/metadata/one.json' }] as never)
+  const record = { id: 'one', uri: 'file:///documents/recordings/accounts/alice/one.m4a', title: '会议', createdAt: '', duration: 10 }
+  jest.mocked(FS.readFile).mockResolvedValue(JSON.stringify(record))
+  jest.mocked(listNotes).mockResolvedValue([{ id: 'note-one', task_id: 'one' }] as never)
+  jest.mocked(setNoteDeleted).mockRejectedValueOnce(new Error('回收站不可用'))
+  await expect(deleteRecording(record)).rejects.toThrow('回收站不可用')
+  expect(FS.unlink).not.toHaveBeenCalled()
+})
 
 test('draft survives missing audio and failed finalization does not erase metadata', async () => {
   jest.mocked(readAccountId).mockResolvedValue('alice')
@@ -32,6 +57,7 @@ test('cancelled picker does not create a recording; imported source is copied an
   jest.mocked(FS.stat).mockResolvedValue({ size: 4096 } as never)
   const record = await importRecording()
   expect(record).toMatchObject({ extension: 'mp3', source: 'import', originalName: '客户会议.mp3', state: 'saved' })
+  expect(record?.title).toMatch(/｜导入录音$/)
   expect(FS.copyFile).toHaveBeenCalledWith('file:///cache/import-a', expect.stringContaining('/accounts/alice/'))
   expect(NativeModules.MeetingFiles.releaseAudio).toHaveBeenCalled()
 })

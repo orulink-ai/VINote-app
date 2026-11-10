@@ -5,11 +5,12 @@ import { RecordingsScreen } from '../src/screens/RecordingsScreen'
 import { PrimaryButton } from '../src/components/PrimaryButton'
 import { ScreenHeader } from '../src/components/ScreenHeader'
 import { RecordingProcessingStatus } from '../src/components/RecordingProcessingStatus'
-import { exportRecording, listRecordings } from '../src/features/recording/recordingLibrary'
+import { deleteRecording, exportRecording, listRecordings } from '../src/features/recording/recordingLibrary'
 import { transitionIdentity } from '../src/lib/sessionIdentity'
+import { listNotes } from '../src/lib/notes'
 
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
-jest.mock('../src/features/recording/recordingLibrary', () => ({ listRecordings: jest.fn(), exportRecording: jest.fn() }))
+jest.mock('../src/features/recording/recordingLibrary', () => ({ listRecordings: jest.fn(), exportRecording: jest.fn(), deleteRecording: jest.fn(async () => {}) }))
 jest.mock('../src/lib/notes', () => ({ listNotes: jest.fn(async () => []) }))
 jest.mock('../src/features/recording/generateRecording', () => ({ generateRecording: jest.fn(), generateRecordingSummary: jest.fn() }))
 jest.mock('../src/features/recording/useRecordingProgress', () => ({ useRecordingProgress: () => null }))
@@ -24,10 +25,36 @@ const pressLabel = (label: string) => view.root.findAll(node => node.props.acces
 async function mount() {
   await act(async () => { view = Renderer.create(<RecordingsScreen onBack={jest.fn()} onOpenNote={jest.fn()} />) })
   await act(async () => { pressLabel('打开原录音r1') })
-  await act(async () => { pressLabel('来源与录音操作') })
+  await act(async () => { pressLabel('录音管理') })
 }
 beforeEach(() => { jest.clearAllMocks(); transitionIdentity('owner'); jest.mocked(listRecordings).mockResolvedValue(records) })
 afterEach(() => { act(() => view?.unmount()); jest.restoreAllMocks() })
+
+test('meeting home lists recordings first and retains independently accessible unlinked minutes', async () => {
+  jest.mocked(listNotes).mockResolvedValueOnce([{ id: 'linked', task_id: 'r1', source_type: 'meeting' }, { id: 'orphan', title: '旧纪要', task_id: 'missing', source_type: 'meeting' }] as never)
+  const open = jest.fn()
+  await act(async () => { view = Renderer.create(<RecordingsScreen home onBack={jest.fn()} onOpenNote={open} />) })
+  expect(view.root.findByType(ScreenHeader).props.title).toBe('会议')
+  expect(view.root.findAll(node => node.props.accessibilityLabel === '打开原录音r1')).not.toHaveLength(0)
+  expect(view.root.findAll(node => node.props.accessibilityLabel === '打开未关联录音的纪要 旧纪要')).not.toHaveLength(0)
+  await act(async () => { pressLabel('打开原录音r1') })
+  expect(view.root.findByType(ScreenHeader).props.title).toBe('会议详情')
+  expect(view.root.findByProps({ accessibilityLabel: '查看版本 1' })).toBeDefined()
+})
+
+test('after deleting a meeting the detail closes and returns to the recording list', async () => {
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {})
+  await mount()
+  const label = view.root.find(node => node.props.children === '删除会议及原录音')
+  let pressable = label.parent
+  while (pressable && typeof pressable.props.onPress !== 'function') pressable = pressable.parent
+  await act(async () => { pressable!.props.onPress() })
+  const buttons = alert.mock.calls[0][2]!
+  jest.mocked(listRecordings).mockResolvedValue([records[1]])
+  await act(async () => { buttons.find(button => button.text === '删除')!.onPress!() })
+  expect(deleteRecording).toHaveBeenCalledWith(records[0])
+  expect(view.root.findByType(ScreenHeader).props.title).toBe('录音库')
+})
 
 test.each(['saved', 'cancelled'] as const)('shows actual %s outcome after action finally, clears progress and locks duplicate export', async result => {
   let finish!: (value: 'saved' | 'cancelled') => void

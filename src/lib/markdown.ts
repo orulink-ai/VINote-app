@@ -3,6 +3,15 @@ import MarkdownIt from 'markdown-it'
 // Native rendering never executes HTML. Preview transformations do not mutate saved Markdown.
 export const markdownParser = new MarkdownIt({ html: false, linkify: false, typographer: false, breaks: true })
 
+/** Avoid repeating the screen title while leaving stored and exported Markdown intact. */
+export function omitDuplicateTitle(content: string, title: string): string {
+  const heading = content.match(/^\s*(?:#{1,2}\s+([^\r\n]+)|\*\*([^\r\n]+)\*\*)(?:\r?\n|$)/)
+  if (!heading) return content
+  const plain = (value: string) => value.replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim()
+  const remainder = content.slice(heading[0].length).replace(/^\s*\n/, '')
+  return plain(heading[1] || heading[2]) === plain(title) && remainder.trim() ? remainder : content
+}
+
 export function markdownPreview(content: string): string {
   const result: string[] = []
   const screenshotLabel = /^screenshot\s*:?\s*\d{1,2}:\d{2}(?::\d{2})?$/i

@@ -32,11 +32,11 @@ export function StorageScreen({ onBack, onFiles, onOpen }: { onBack: () => void;
   return <View style={styles.screen}><ScreenHeader title="存储" onBack={onBack} backLabel="返回设置" />
     <ScrollView contentContainerStyle={styles.content}>
       <Text style={styles.sectionTitle}>文件与目录</Text>
-      <Text selectable style={styles.subtitle}>{FS.DocumentDirectoryPath}</Text>
+      <Text style={styles.subtitle}>录音和导入的原文件保存在此设备。</Text>
       {!!space && <Text style={styles.subtitle}>{space}</Text>}
       <PrimaryButton secondary title="查看文件" onPress={onFiles} />
       <Text style={styles.sectionTitle}>回收站</Text>
-      <Text style={styles.subtitle}>删除的正文和历史可恢复；原文件与已发布文档独立保留。</Text>
+      <Text style={styles.subtitle}>可恢复已删除的正文和历史；原文件按删除时的选择处理，已发布文档仍在飞书。</Text>
       <AsyncState loading={!ready && !error} error={error} onRetry={() => void load().catch(cause => setError(cause.message))} retryLabel="重新读取" />
       {ready && !rows.length && <Text style={styles.subtitle}>回收站为空</Text>}
       {rows.map(note => <View key={note.id} style={styles.listRow}><Text style={styles.noteTitle}>{note.title}</Text><PrimaryButton secondary title="恢复" disabled={busy} onPress={async () => {

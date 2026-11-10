@@ -5,7 +5,7 @@ import { readSession, saveSession, clearToken, type Session } from '../src/lib/s
 import { identityEpoch } from '../src/lib/sessionIdentity'
 import { beginVerification, finishVerification, captureRemoteScope, assertRemoteScope, pauseRemote, remoteReady, identityScope } from '../src/lib/sessionGate'
 import { integrationJson } from '../src/lib/integration'
-import { apiJson, apiTextStream } from '../src/lib/api'
+import { apiJson, apiTextStream, meetingUploadJson } from '../src/lib/api'
 import { requestTextStream } from '../src/lib/textStream'
 import { verifySession } from '../src/lib/sessionVerifier'
 import { rememberVerifiedCache, trustedLocalCache } from '../src/lib/ownerCacheScope'
@@ -36,6 +36,72 @@ beforeEach(async () => {
   await saveSession(session())
 })
 afterEach(() => pauseRemote())
+
+test('meeting upload survives ordinary background rechecking but stops on account change', async () => {
+  grant()
+  const request = remoteRequest('A', 60000, undefined, true)
+  try {
+    pauseRemote()
+    expect(request.signal.aborted).toBe(false)
+    request.guard()
+    grant()
+    expect(request.signal.aborted).toBe(false)
+    await clearToken()
+    expect(request.signal.aborted).toBe(true)
+  } finally { request.close() }
+})
+
+test('a meeting upload response survives ordinary background and foreground verification', async () => {
+  grant()
+  let finish!: (value: Response) => void
+  network.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const work = meetingUploadJson('/v1/asr/transcription-jobs', { method: 'POST' }, 'A', 60000)
+  for (let i = 0; i < 30 && !finish; i++) await Promise.resolve()
+  expect(finish).toBeDefined()
+  pauseRemote(); grant(); finish(response(200, { id: 'original-job', status: 'queued' }))
+  await expect(work).resolves.toEqual({ id: 'original-job', status: 'queued' })
+  expect(network).toHaveBeenCalledTimes(1)
+})
+
+test.each(['offline-known', 'checking', 'expired'] as const)('an already-sent meeting upload survives %s verification but new uploads remain blocked', async mode => {
+  grant()
+  let finish!: (value: Response) => void
+  network.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const work = meetingUploadJson('/v1/asr/transcription-jobs', { method: 'POST' }, 'A', 60000)
+  for (let i = 0; i < 30 && !finish; i++) await Promise.resolve()
+  expect(finish).toBeDefined()
+  const verification = beginVerification('A')
+  finishVerification(verification, mode)
+  expect(remoteReady('A')).toBe(false)
+  await expect(meetingUploadJson('/v1/asr/transcription-jobs', { method: 'POST' }, 'A', 60000)).rejects.toThrow()
+  finish(response(200, { id: 'original-job', status: 'queued' }))
+  await expect(work).resolves.toEqual({ id: 'original-job', status: 'queued' })
+  expect(network).toHaveBeenCalledTimes(1)
+})
+test('an in-flight upload survives an unexpected verification error but not an account switch', async () => {
+  grant()
+  const upload = remoteRequest('A', 60000, undefined, true)
+  try {
+    pauseRemote('checking', true)
+    expect(upload.signal.aborted).toBe(false)
+    upload.guard()
+    await saveSession(session('B'))
+    expect(upload.signal.aborted).toBe(true)
+  } finally { upload.close() }
+})
+
+test('a late meeting upload response is rejected after logout', async () => {
+  grant()
+  let finish!: (value: Response) => void
+  network.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const work = meetingUploadJson('/v1/asr/transcription-jobs', { method: 'POST' }, 'A', 60000)
+  for (let i = 0; i < 30 && !finish; i++) await Promise.resolve()
+  expect(finish).toBeDefined()
+  await clearToken()
+  finish(response(200, { id: 'original-job', status: 'queued' }))
+  await expect(work).rejects.toThrow()
+  expect(network).toHaveBeenCalledTimes(1)
+})
 
 test('closed gate blocks business GET, POST and stream before network or refresh', async () => {
   await expect(integrationJson('/api/mcp-connections/runs', { method: 'POST' }, 'A')).rejects.toMatchObject({ code: 'SESSION_NOT_VERIFIED' })

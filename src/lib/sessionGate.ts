@@ -10,6 +10,8 @@ let attempt = 0
 let streamRevocation = 0
 export type StreamScope = IdentityScope & { asrOrigin: string; revocation: number }
 const issuedStreamScopes = new WeakSet<StreamScope>()
+export type UploadScope = IdentityScope & { asrOrigin: string }
+const issuedUploadScopes = new WeakSet<UploadScope>()
 let state: { mode: GateMode; scope: IdentityScope | null } = { mode: 'checking', scope: null }
 const listeners = new Set<() => void>()
 const normalize = (value: string) => value.replace(/\/+$/, '')
@@ -59,6 +61,20 @@ export function assertRemoteScope(scope: RemoteScope) {
   if (state.mode !== 'verified' || state.scope?.owner !== scope.owner || scope.lease !== attempt) throw new SessionGateError()
 }
 export function remoteReady(owner?: string) { try { captureRemoteScope(owner); return true } catch { return false } }
+
+// An upload authorised while online remains tied to the same account and origin.
+// A later verifier/network failure cannot change what was already sent; logout or
+// an account/origin change still revokes it. Starting another upload requires verification.
+export function captureUploadScope(expectedOwner?: string): UploadScope {
+  const verified = captureRemoteScope(expectedOwner)
+  const scope = Object.freeze({ owner: verified.owner, epoch: verified.epoch, authOrigin: verified.authOrigin, integrationOrigin: verified.integrationOrigin, asrOrigin: normalize(API_BASE_URL) })
+  issuedUploadScopes.add(scope)
+  return scope
+}
+export function assertUploadScope(scope: UploadScope) {
+  assertIdentity(scope)
+  if (!issuedUploadScopes.has(scope) || scope.asrOrigin !== normalize(API_BASE_URL) || state.mode === 'signed-out' || !state.scope || state.scope.owner !== scope.owner) throw new SessionGateError()
+}
 
 // Permits issued at a verified start survive only normal checking/renewal.
 // HTTP/tool scopes retain their original stricter per-verification lease contract.

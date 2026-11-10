@@ -1,4 +1,7 @@
 import { modelDisplay } from '../src/lib/modelDisplay'
+test('shows the provider for the meeting-file recognition model', () => {
+  expect(modelDisplay({ id: 'opaque-meeting', modelType: 'asr', runtimeStatus: 'available', providerId: 'volcengine-asr-meeting', providerModel: 'bigmodel' }, 'asr')).toBe('豆包录音文件识别 · bigmodel')
+})
 test('actual public catalog distinguishes providers without decoding routing IDs', () => {
   expect(modelDisplay({ id: 'opaque-a', modelType: 'asr', runtimeStatus: 'available', providerId: 'aliyun', providerModel: 'paraformer-realtime-v2' }, 'asr')).toBe('阿里云 · paraformer-realtime-v2')
   expect(modelDisplay({ id: 'opaque-b', modelType: 'asr', runtimeStatus: 'available', providerId: 'volcengine-asr', providerModel: 'bigmodel' }, 'asr')).toBe('豆包 · bigmodel')
