@@ -172,10 +172,6 @@ export function FeishuDeliveryPanel({
         setOptions(local.preferences)
         initialized.current = true
       }
-      if (saved?.jobPhase === 'rejected' && saved.jobStatusVerified) {
-        setJob(null); setLoadedNote(note.id); setError(saved.jobError || '原发布已明确拒绝，请检查设置后重新准备发布。')
-        return
-      }
       const recovered = pending ? await queryRetryReceipt(pending) : null
       const next = !pending && saved && saved.state !== 'draft' ? await queryPublishReceipt(saved) : null
       const latest = recovered ? recovered.job : next ? next.job : await deliveryStatus(note.workspace_key || note.id, owner)
@@ -435,7 +431,6 @@ export function FeishuDeliveryPanel({
               processing: '正在创建文档与发送通知…',
               completed: '已完成',
               failed: '交付需处理',
-              cancelled: '交付已取消',
             }[job.status]
           : '尚未交付到飞书'}
       </Text>
@@ -546,7 +541,7 @@ export function FeishuDeliveryPanel({
         }
         onPress={() => void action()}
       />}</View></BottomActionSheetFooter>
-      {receipt?.state === 'acknowledged' && (job?.status === 'completed' || (receipt.jobPhase === 'rejected' && receipt.jobStatusVerified)) && <PrimaryButton secondary title="准备发布当前已保存版本" disabled={busy || loading || !!retryPending} onPress={async () => { if (retryPending || busy || loading) return; try { const owner = await readAccountId(); if (!owner || owner !== receipt.owner) throw new Error('账号已切换'); const { expected_connection_binding: _binding, ...manualOptions } = options; const next = newPublishDraft(owner, note.workspace_key || note.id, { title: note.title, content: note.content, versionId: note.workspace_version_id, revisionId: note.workspace_revision === undefined ? undefined : String(note.workspace_revision) }, manualOptions); await persistPublishDraft(next); remember(next); setOptions(next.options); invalidateReview(); setError('') } catch (cause) { setError((cause as Error).message) } }} />}
+      {receipt?.state === 'acknowledged' && job?.status === 'completed' && <PrimaryButton secondary title="准备发布当前已保存版本" disabled={busy || loading || !!retryPending} onPress={async () => { if (retryPending || busy || loading) return; try { const owner = await readAccountId(); if (!owner || owner !== receipt.owner) throw new Error('账号已切换'); const next = newPublishDraft(owner, note.workspace_key || note.id, { title: note.title, content: note.content, versionId: note.workspace_version_id, revisionId: note.workspace_revision === undefined ? undefined : String(note.workspace_revision) }, options); await persistPublishDraft(next); remember(next); setOptions(next.options); invalidateReview() } catch (cause) { setError((cause as Error).message) } }} />}
       {job && Object.entries(job.recipients).filter(([, recipient]) => recipient.status === 'failed').map(([id, recipient]) => <PrimaryButton key={id} secondary title={`仅重试 ${recipient.name}`} disabled={verificationUnavailable || busy || loading || !!retryPending || !receiptSupported || receipt?.state === 'unknown' || deliveryUncertain} onPress={() => void action(true, [id])} />)}
       {onSettings ? (
         <PrimaryButton secondary title="管理飞书设置" disabled={busy || reviewBusy || loading} onPress={async () => {
