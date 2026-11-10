@@ -17,7 +17,7 @@ export async function feishuContacts(query: string, page_token = '', owner?: str
   if (!Array.isArray(result.items) || typeof result.has_more !== 'boolean' || typeof result.page_token !== 'string' || (result.has_more && !result.page_token) || !Number.isFinite(result.selection_expires_in) || !(result.selection_expires_in > 0) || result.items.some(item => !item || typeof item.name !== 'string' || !item.name.trim() || typeof item.open_id !== 'string' || !/^ou_[A-Za-z0-9_-]+$/.test(item.open_id) || typeof item.selection_token !== 'string' || !item.selection_token)) throw new Error('联系人响应未核验，请重新读取')
   return { ...result, items: result.items.map(({ open_id, name, selection_token }) => ({ open_id, name, selection_token, expiresAt: started + Math.min(result.selection_expires_in, 900) * 1000 })) }
 }
-export type PublishOptions = { recipient_access_policy?: 'grant_view_and_notify'; destination_config?: FeishuDestination; permission_policy?: 'private' | 'inherit'; notify_self?: boolean; groups?: string[]; contacts?: FeishuContact[]; version_id?: string; revision_id?: string; operation_id?: string; expected_connection_binding?: string }
+export type PublishOptions = { recipient_access_policy?: 'grant_view_and_notify'; destination_config?: FeishuDestination; permission_policy?: 'private' | 'inherit'; notify_self?: boolean; groups?: string[]; contacts?: FeishuContact[]; version_id?: string; revision_id?: string; operation_id?: string }
 export function newSnapshotPublishOptions(options: PublishOptions): PublishOptions {
   const { recipient_access_policy: _, ...rest } = options
   return { ...rest, ...(options.groups?.length || options.contacts?.length ? { recipient_access_policy: 'grant_view_and_notify' as const } : {}) }
@@ -30,8 +30,6 @@ export function feishuPublishBody(key: string, title: string, content: string, a
 }
 
 export type FeishuStatus = {
-  device_bound_publish_protocol?: number
-  connection_binding_hash?: string
   publish_receipt_protocol?: number
   contact_selection_protocol?: number
   recipient_access_protocol?: number
@@ -57,8 +55,7 @@ export type Delivery = {
   error_code?: string
   formatting?: FormattingReceipt
   operation_id?: string
-  status: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled'
-  storage_status?: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled'
+  status: 'queued' | 'processing' | 'completed' | 'failed'
   needs_document_recovery?: boolean
   document_url: string
   error: string
@@ -122,7 +119,7 @@ export const publishToFeishu = async (
   const payload = feishuPublishBody(key, title, content, automatic, options)
   return dispatchFeishuPublish(attempt, account, options?.operation_id || '', payload,
     () => assertFeishuPublishReady(account, epoch), () => feishuApi<Delivery | null>(
-    options?.expected_connection_binding ? '/deliveries/device-bound' : '/deliveries',
+    '/deliveries',
     {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -136,21 +133,15 @@ export const retryDelivery = (id: string, recipients?: string[], owner?: string)
     ...(recipients ? { body: JSON.stringify({ recipients }) } : {}),
   }, owner)
 
-let legacyOutboxWrites: Promise<void> = Promise.resolve()
 export async function queueAutomaticDelivery(
   note: { id: string; title: string; content: string },
   owner: string,
 ) {
-  const epoch = identityEpoch()
-  const write = legacyOutboxWrites.catch(() => {}).then(async () => {
-    if ((await readAccountId()) !== owner || identityEpoch() !== epoch) return
-    const key = `vinote:${owner}:feishu-outbox:${note.id}`
-    const existing = await Storage.getItem(key)
-    if ((await readAccountId()) !== owner || identityEpoch() !== epoch) return
-    if (existing === null) await Storage.setItem(key, JSON.stringify(note))
-  })
-  legacyOutboxWrites = write
-  await write
+  if ((await readAccountId()) !== owner) return
+  await Storage.setItem(
+    `vinote:${owner}:feishu-outbox:${note.id}`,
+    JSON.stringify(note),
+  )
   // This legacy format has no operation id. Never replay an uncertain POST.
 }
 export async function flushAutomaticDeliveries() {

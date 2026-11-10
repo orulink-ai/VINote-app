@@ -35,10 +35,6 @@ import { MainAccountActionContext } from './src/components/ScreenHeader'
 import { StorageScreen } from './src/screens/StorageScreen'
 import { deliveryReturnCurrent, type FeishuDeliveryReturn } from './src/lib/feishuDeliveryReturn'
 import { subscribeIdentity } from './src/lib/sessionIdentity'
-import { readAccountId } from './src/lib/storage'
-import { listFeishuAutomaticIds } from './src/lib/feishuAutomaticQueue'
-import { processFeishuAutomatic } from './src/lib/feishuAutomaticWorker'
-import { recoverAutomaticHandoffs } from './src/features/recording/generateRecording'
 import type { IntakeHistoryTarget } from './src/lib/intakeHistory'
 
 type Screen = 'sourceFiles' | 'meetings' | 'projects' | 'projectContent' | 'record' | 'recordings' | 'notes' | 'detail' | 'feishu' | 'account' | 'settings' | 'settingsPlugins' | 'files' | 'text' | 'noteIntake' | 'tasks' | 'mcp' | 'connections' | 'contentPlugins' | 'models' | 'appearance' | 'data'
@@ -46,28 +42,6 @@ type Screen = 'sourceFiles' | 'meetings' | 'projects' | 'projectContent' | 'reco
 export default function App() {
   const dark = useAppAppearance()
   const { readable: authenticated, mode: sessionMode, message: sessionError, retry, restart, showLogin } = useTrustedSession()
-  useEffect(() => {
-    if (!authenticated) return
-    let live = true
-    let recovering = false
-    const recover = async () => {
-      if (recovering) return
-      recovering = true
-      try {
-        const owner = await readAccountId()
-        if (!owner || !live) return
-        await recoverAutomaticHandoffs(owner)
-        for (const id of await listFeishuAutomaticIds(owner)) {
-          if (!live || await readAccountId() !== owner) return
-          await processFeishuAutomatic(owner, id).catch(() => {})
-        }
-      } finally { recovering = false }
-    }
-    void recover().catch(() => {})
-    const listener = AppState.addEventListener('change', state => { if (state === 'active') void recover().catch(() => {}) })
-    const timer = setInterval(() => { if (AppState.currentState === 'active') void recover().catch(() => {}) }, 20000)
-    return () => { live = false; listener.remove(); clearInterval(timer) }
-  }, [authenticated])
   const feishuParent = useRef<Screen>('notes')
   const [screen, setScreen] = useState<Screen>('meetings')
   const currentDetail = useRef<{ screen: Screen; noteId: string | null }>({ screen: 'meetings', noteId: null })

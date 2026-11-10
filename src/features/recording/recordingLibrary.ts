@@ -8,10 +8,6 @@ import type { TranscriptionCheckpoint, SummaryCheckpoint } from '../../lib/meeti
 import type { SpeakerCheckpoint } from '../../lib/meetingSpeakers'
 import type { ProcessingTiming } from '../../lib/processingHelpers'
 import { listNotes, setNoteDeleted } from '../../lib/notes'
-import type { AutomaticIntent } from '../../lib/feishuAutomaticQueue'
-import { readFeishuAutomatic, removeFeishuAutomatic } from '../../lib/feishuAutomaticQueue'
-import { withFeishuAutoLock } from '../../lib/feishuAutoMutex'
-import { assertPublishCanBeDeleted, redactDeletedPublish } from '../../lib/feishuPublishReceipt'
 import { executeMeetingDeletion } from './meetingDeleteExecution'
 import { acquireRecordingLock, getGenerationProgress } from './recordingProcessing'
 import { identityEpoch, SessionScopeChangedError } from '../../lib/sessionIdentity'
@@ -33,7 +29,7 @@ async function recordingScope() {
   return { owner, directory, guard }
 }
 
-export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; bookmarks?: Array<{ seconds: number; label: string }>; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; lastNoteVersion?: number; autoPublishError?: string; autoHandoff?: AutomaticIntent; error?: string; errorDetails?: { status?: number; code?: string; requestId?: string; asrDiagnostic?: ASRDiagnostic }; processingTimings?: ProcessingTiming[]; transcriptionCheckpoint?: TranscriptionCheckpoint; meetingFilePrepared?: { wavUri: string; checkpoint: MeetingFileCheckpoint }; previousMeetingFileAttempts?: Array<{ wavUri: string; checkpoint: MeetingFileCheckpoint }>; summaryCheckpoint?: SummaryCheckpoint; speakerCheckpoint?: SpeakerCheckpoint; speakerAliases?: Record<string, string>; generation?: { status: 'pending' | 'paused'; asrModel: string; llmModel: string; startedAt: string; version?: number; summaryOnly?: SummaryOnlyGeneration } }
+export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; bookmarks?: Array<{ seconds: number; label: string }>; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; lastNoteVersion?: number; error?: string; errorDetails?: { status?: number; code?: string; requestId?: string; asrDiagnostic?: ASRDiagnostic }; processingTimings?: ProcessingTiming[]; transcriptionCheckpoint?: TranscriptionCheckpoint; meetingFilePrepared?: { wavUri: string; checkpoint: MeetingFileCheckpoint }; previousMeetingFileAttempts?: Array<{ wavUri: string; checkpoint: MeetingFileCheckpoint }>; summaryCheckpoint?: SummaryCheckpoint; speakerCheckpoint?: SpeakerCheckpoint; speakerAliases?: Record<string, string>; generation?: { status: 'pending' | 'paused'; asrModel: string; llmModel: string; startedAt: string; version?: number; summaryOnly?: SummaryOnlyGeneration } }
 export type SummaryOnlyGeneration = { evidenceKey: string }
 export async function accountDirectory() {
   const account = await readAccountId()
@@ -143,16 +139,8 @@ export async function deleteRecording(record: LocalRecording) {
       return current
     },
     loadNotes: () => listNotes(scope.owner),
-    trashNote: id => setNoteDeleted(id, true, scope.owner, record.id),
+    trashNote: id => setNoteDeleted(id, true, scope.owner),
     removeOriginal: async current => {
-      if (current.autoHandoff) await withFeishuAutoLock(async () => {
-        const handoff = current.autoHandoff!
-        const queued = await readFeishuAutomatic(scope.owner, handoff.note.id)
-        if (queued && queued.operationId !== handoff.operationId) throw new Error('自动发布任务已变化，请先核验')
-        await assertPublishCanBeDeleted(scope.owner, handoff.note.id)
-        await redactDeletedPublish(scope.owner, handoff.note.id)
-        await removeFeishuAutomatic(scope.owner, handoff.note.id)
-      })
       const path = current.uri.replace('file://', '')
       const metadata = `${scope.directory}/${record.id}.json`
       for (const file of [path, metadata, `${metadata}.tmp`]) {

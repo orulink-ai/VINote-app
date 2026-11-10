@@ -1,5 +1,5 @@
 import Storage from '@react-native-async-storage/async-storage'
-import { beginPublishAttempt, newPublishDraft, persistPublishDraft, readPublishDraft, restoreUndispatchedPublish, redactDeletedPublish } from '../src/lib/feishuPublishReceipt'
+import { beginPublishAttempt, newPublishDraft, persistPublishDraft, readPublishDraft, restoreUndispatchedPublish } from '../src/lib/feishuPublishReceipt'
 import { publishToFeishu, FeishuPreflightError, newSnapshotPublishOptions, feishuPublishBody } from '../src/lib/feishu'
 import { publishOptionsSignature } from '../src/lib/feishuPublishReview'
 import { integrationJson } from '../src/lib/integration'
@@ -20,34 +20,6 @@ async function begin() {
 async function call(value: Awaited<ReturnType<typeof begin>>) {
   return publishToFeishu(value.draft.publicationKey || value.draft.noteKey, value.draft.snapshot.title, value.draft.snapshot.content, false, 'owner', { ...value.draft.options, operation_id: value.draft.operationId }, value.attempt)
 }
-test('cannot submit a draft with changed recipients that were not saved', async () => {
-  const draft = newPublishDraft('owner', 'recipient-race', { title: '纪要', content: '正文' }, { notify_self: true, groups: [] })
-  await persistPublishDraft(draft)
-  await expect(beginPublishAttempt({ ...draft, options: { ...draft.options, groups: ['oc_other'] } })).rejects.toThrow()
-  expect((await readPublishDraft('owner', 'recipient-race'))?.state).toBe('draft')
-})
-test('deleting content redacts an unknown submission but preserves its operation for lookup', async () => {
-  const attempt = await begin()
-  await redactDeletedPublish('owner', 'note')
-  const receipt = await readPublishDraft('owner', 'note')
-  expect(receipt).toMatchObject({ state: 'unknown', operationId: attempt.draft.operationId, snapshot: { title: '', content: '' } })
-  await expect(beginPublishAttempt({ ...receipt!, state: 'draft' })).rejects.toThrow()
-})
-test('deleting content redacts all archived operations while preserving their identifiers', async () => {
-  const first = newPublishDraft('owner', 'history-note', { title: '旧标题', content: '旧正文' }, {})
-  await persistPublishDraft({ ...first, operationId: 'first', state: 'acknowledged', jobId: 'job1' })
-  const second = newPublishDraft('owner', 'history-note', { title: '新标题', content: '新正文' }, {})
-  await persistPublishDraft({ ...second, operationId: 'second', state: 'draft' })
-  await persistPublishDraft({ ...second, operationId: 'second', state: 'unknown' })
-  await redactDeletedPublish('owner', 'history-note')
-  const keys = (await Storage.getAllKeys()).filter(key => key.includes('feishu-publish:history-note:'))
-  expect(keys).toHaveLength(2)
-  for (const key of keys) {
-    const saved = JSON.parse((await Storage.getItem(key))!)
-    expect(saved.snapshot).toEqual({ title: '', content: '' })
-    expect(['first', 'second']).toContain(saved.operationId)
-  }
-})
 test('late plugin rejection proves zero POST and restores only current attempt with same operation', async () => {
   const value = await begin()
   let error: unknown

@@ -24,28 +24,6 @@ import { runPreparedMeetingFile } from '../../lib/meetingFileAdapter'
 import { operationId } from '../../lib/integration'
 import { API_BASE_URL } from '../../config/env'
 import { meetingFileEvidence } from '../../lib/meetingFileEvidence'
-import { createAutomaticHandoff, persistAutomaticHandoff, type AutomaticNote } from '../../lib/feishuAutomaticQueue'
-import { processFeishuAutomatic } from '../../lib/feishuAutomaticWorker'
-import { withFeishuAutoLock } from '../../lib/feishuAutoMutex'
-async function prepareHandoff(owner: string, current: LocalRecording, note: AutomaticNote, guard: () => Promise<void>) {
-  let handoff = current.autoHandoff
-  if (handoff && JSON.stringify(handoff.note) !== JSON.stringify(note)) throw new Error('原自动发布任务与纪要不一致，请核验原任务')
-  let autoPublishError: string | undefined
-  if (!handoff) {
-    try { handoff = await createAutomaticHandoff(owner, note) || undefined }
-    catch (error) { autoPublishError = error instanceof Error ? error.message : '自动发布设置无法读取' }
-  }
-  if (handoff || autoPublishError) {
-    current = { ...current, autoHandoff: handoff, autoPublishError }
-    await guard(); await saveRecording(current)
-  }
-  let prepared = false
-  if (handoff) {
-    try { await persistAutomaticHandoff(handoff); prepared = true }
-    catch (error) { autoPublishError = error instanceof Error ? error.message : '自动发布任务未能保存' }
-  }
-  return { current, handoff, prepared, autoPublishError }
-}
 export async function generateRecording(record: LocalRecording, onProgress: (text: string) => void, resume = false) {
   if (recordingASRBlocked(record)) throw new Error(RECORDING_ASR_BLOCKED)
   if (record.generation?.summaryOnly) throw new Error('请通过“仅生成纪要”确认总结模型后继续；不会重新转写或分析说话人')
@@ -79,7 +57,6 @@ export async function generateRecording(record: LocalRecording, onProgress: (tex
         await saveRecording({ ...record, noteId: savedNote.id,
           lastNoteVersion: Math.max(record.lastNoteVersion || 0, record.generation.version),
           generation: undefined, error: undefined, errorDetails: undefined })
-        void processFeishuAutomatic(owner, savedNote.id).catch(() => {})
         return savedNote.id
       }
     }
@@ -201,13 +178,10 @@ export async function generateRecording(record: LocalRecording, onProgress: (tex
     await guard()
     const topic = summaryTopic(content)
     const noteTitle = recordingTitle(current.createdAt, topic || (current.titleSource === 'manual' ? current.title : '会议交流'))
-    const handoff = await prepareHandoff(owner, current, { id: noteIdForVersion(record.id, version), title: noteTitle, content }, guard)
-    current = handoff.current
     const note = await measure('note-save', () => createNote({ title: noteTitle, content, task_id: record.id }, owner, version), timing)
     timing({ stage: 'total', durationMs: Date.now() - started })
     await saveRecording({ ...current, noteId: note.id, lastNoteVersion: Math.max(current.lastNoteVersion || 0, version),
-      llmModel: selection.llm_model, generation: undefined, autoPublishError: handoff.autoPublishError, autoHandoff: handoff.prepared ? undefined : handoff.handoff })
-    if (handoff.prepared) void processFeishuAutomatic(owner, note.id).catch(() => {})
+      llmModel: selection.llm_model, generation: undefined })
     return note.id
   } catch (error) {
     timing({ stage: 'total', durationMs: Date.now() - started })
@@ -278,7 +252,6 @@ export async function generateRecordingSummary(confirmation: SummaryRecoveryConf
         await saveRecording({ ...latest.record, noteId: savedNote.id,
           lastNoteVersion: Math.max(latest.record.lastNoteVersion || 0, version), llmModel: confirmation.llmModel,
           generation: undefined, error: undefined, errorDetails: undefined })
-        void processFeishuAutomatic(owner, savedNote.id).catch(() => {})
         return savedNote.id
       }
     }
@@ -310,13 +283,10 @@ export async function generateRecordingSummary(confirmation: SummaryRecoveryConf
     if (latest.evidenceKey !== prepared.evidenceKey) throw new Error('原录音或完整结果已变化，未保存新纪要')
     const topic = summaryTopic(content)
     const title = recordingTitle(record.createdAt, topic || (record.titleSource === 'manual' ? record.title : '会议交流'))
-    const handoff = await prepareHandoff(owner, current, { id: noteIdForVersion(record.id, version), title, content }, guard)
-    current = handoff.current
     const note = await createNote({ title, content, task_id: record.id }, owner, version)
     await guard()
     await saveRecording({ ...current, noteId: note.id, lastNoteVersion: Math.max(record.lastNoteVersion || 0, version),
-      llmModel: confirmation.llmModel, generation: undefined, error: undefined, errorDetails: undefined, autoPublishError: handoff.autoPublishError, autoHandoff: handoff.prepared ? undefined : handoff.handoff })
-    if (handoff.prepared) void processFeishuAutomatic(owner, note.id).catch(() => {})
+      llmModel: confirmation.llmModel, generation: undefined, error: undefined, errorDetails: undefined })
     return note.id
   } catch (error) {
     // No automatic LLM replay, including ambiguous transport failures. Keep
@@ -334,31 +304,6 @@ export async function generateRecordingSummary(confirmation: SummaryRecoveryConf
 }
 
 let recovery: Promise<void> | undefined
-export async function recoverAutomaticHandoffs(owner: string): Promise<void> {
-  for (const record of await listRecordings()) {
-    if (!record.autoHandoff) continue
-    if (await readAccountId() !== owner || record.autoHandoff.owner !== owner) return
-    let release: (() => void) | undefined
-    try {
-      release = acquireRecordingLock(owner, record.id)
-      let savedId = ''
-      await withFeishuAutoLock(async () => {
-        const latest = (await listRecordings()).find(item => item.id === record.id)
-        if (!latest?.autoHandoff) return
-        const saved = await getNote(latest.autoHandoff.note.id, { expectedOwner: owner })
-        if (saved.deleted || saved.status !== 'done' || saved.task_id !== latest.id ||
-            (latest.generation?.version && saved.version !== latest.generation.version) ||
-            saved.title !== latest.autoHandoff.note.title || saved.content !== latest.autoHandoff.note.content) return
-        await persistAutomaticHandoff(latest.autoHandoff)
-        await saveRecording({ ...latest, autoHandoff: undefined, autoPublishError: undefined })
-        savedId = saved.id
-      })
-      release(); release = undefined
-      if (savedId) await processFeishuAutomatic(owner, savedId).catch(() => {})
-    } catch { /* Keep the frozen handoff and original error for the next attempt. */ }
-    finally { release?.() }
-  }
-}
 export function resumePendingRecordings(progress: (text: string) => void): Promise<void> {
   if (recovery) return recovery
   recovery = (async () => {

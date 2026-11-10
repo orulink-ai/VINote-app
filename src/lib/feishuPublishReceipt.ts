@@ -1,7 +1,7 @@
 import Storage from '@react-native-async-storage/async-storage'
 import { readAccountId } from './storage'
 import { integrationBaseUrl, operationId } from './integration'
-import { deliveryById, deliveryByOperation, feishuApi, feishuPublishBody, newSnapshotPublishOptions, type Delivery, type PublishOptions } from './feishu'
+import { deliveryById, deliveryByOperation, feishuPublishBody, newSnapshotPublishOptions, type Delivery, type PublishOptions } from './feishu'
 import type { PublishReview } from './feishuPublishReview'
 import { identityEpoch } from './sessionIdentity'
 import { createFeishuPublishAttempt, provedNotDispatched, type FeishuPublishAttempt } from './feishuPublishAttempt'
@@ -10,7 +10,6 @@ export type PublishDraft = {
   owner: string; noteKey: string; origin: string; operationId: string
   snapshot: { title: string; content: string; versionId?: string; revisionId?: string }
   options: PublishOptions; state: 'draft' | 'unknown' | 'acknowledged'; jobId?: string
-  jobStatus?: Delivery['status']; jobPhase?: string; jobError?: string; jobStatusVerified?: boolean
   review?: PublishReview
   publicationKey?: string
 }
@@ -43,8 +42,7 @@ export function beginPublishAttempt(draft: PublishDraft): Promise<{ draft: Publi
     await guard(copy.owner, epoch)
     const previous = await readPublishDraft(copy.owner, copy.noteKey)
     if (copy.state !== 'draft' || !previous || previous.state !== 'draft' || previous.operationId !== copy.operationId || previous.publicationKey !== copy.publicationKey ||
-        JSON.stringify(previous.snapshot) !== JSON.stringify(copy.snapshot) ||
-        JSON.stringify(previous.options) !== JSON.stringify(copy.options)) throw new Error('原发布不是当前未提交草稿，不能创建新的 attempt')
+        JSON.stringify(previous.snapshot) !== JSON.stringify(copy.snapshot)) throw new Error('原发布不是当前未提交草稿，不能创建新的 attempt')
     const attempt = createFeishuPublishAttempt(copy.owner, copy.operationId,
       feishuPublishBody(copy.publicationKey || copy.noteKey, copy.snapshot.title, copy.snapshot.content, false, { ...copy.options, operation_id: copy.operationId }))
     const unknown = { ...copy, state: 'unknown' as const }
@@ -79,44 +77,6 @@ export function persistPublishDraft(draft: PublishDraft): Promise<void> {
   writes = job
   return job
 }
-
-/** Remove deleted content while retaining operation identifiers for query-only recovery. */
-export function redactDeletedPublish(owner: string, note: string): Promise<void> {
-  const epoch = identityEpoch()
-  return serialized(async () => {
-    await guard(owner, epoch)
-    const previous = await readPublishDraft(owner, note)
-    const archivePrefix = `${key(owner, note)}:`
-    const archives = (await Storage.getAllKeys()).filter(item => item.startsWith(archivePrefix))
-    await guard(owner, epoch)
-    for (const archive of archives) {
-      const raw = await Storage.getItem(archive); await guard(owner, epoch)
-      if (!raw) continue
-      const saved = JSON.parse(raw) as PublishDraft
-      if (saved.owner !== owner || saved.noteKey !== note || !saved.operationId || archive !== `${archivePrefix}${saved.operationId}`) throw new Error('历史发布记录无法核验，未删除纪要')
-      await Storage.setItem(archive, JSON.stringify({ ...saved, snapshot: { title: '', content: '' }, review: undefined })); await guard(owner, epoch)
-    }
-    if (!previous) return
-    if (previous.state === 'draft') { await Storage.removeItem(key(owner, note)); await guard(owner, epoch); return }
-    const redacted = { ...previous, snapshot: { title: '', content: '' }, review: undefined }
-    await Storage.setItem(`${key(owner, note)}:${previous.operationId}`, JSON.stringify(redacted)); await guard(owner, epoch)
-    await Storage.setItem(key(owner, note), JSON.stringify(redacted)); await guard(owner, epoch)
-  })
-}
-
-export async function assertPublishCanBeDeleted(owner: string, note: string): Promise<void> {
-  const draft = await readPublishDraft(owner, note)
-  if (!draft || draft.state === 'draft') return
-  if (draft.jobStatusVerified && (draft.jobStatus === 'completed' || draft.jobStatus === 'cancelled' || draft.jobPhase === 'rejected')) return
-  const { job } = await queryPublishReceipt(draft)
-  const stored = job.storage_status || job.status
-  if (!job.storage_status && job.status === 'failed') throw new Error('飞书服务未提供可核验的任务状态，请先核对原任务')
-  if (job.phase === 'unknown' || job.phase === 'permission_unknown') throw new Error('飞书发布结果尚未确认，请先核验原任务再删除')
-  if (stored === 'completed' || stored === 'cancelled') return
-  if (stored !== 'failed' && stored !== 'queued') throw new Error('飞书发布仍在处理，请在任务中等待完成后再删除')
-  const result = await feishuApi<{ cancelled: boolean }>('/deliveries/' + encodeURIComponent(job.id) + '/cancel-device', { method: 'POST', body: '{}' }, owner)
-  if (result.cancelled !== true) throw new Error('飞书发布尚未停止，请核验后再删除')
-}
 async function persist(draft: PublishDraft, epoch: number) {
   await guard(draft.owner, epoch)
   const previous = await readPublishDraft(draft.owner, draft.noteKey)
@@ -141,7 +101,7 @@ export async function queryPublishReceipt(draft: PublishDraft): Promise<{ draft:
   const job = draft.jobId ? await deliveryById(draft.jobId, draft.owner) : await deliveryByOperation(draft.operationId, draft.owner)
   await guard(draft.owner, epoch)
   if ((draft.jobId && job.id !== draft.jobId) || (!draft.jobId && job.operation_id !== draft.operationId) || !job.id) throw new Error('返回回执不属于原发布操作')
-  const confirmed = { ...draft, state: 'acknowledged' as const, jobId: job.id, jobStatus: job.storage_status || job.status, jobPhase: job.phase, jobError: job.error, jobStatusVerified: !!job.storage_status }
+  const confirmed = { ...draft, state: 'acknowledged' as const, jobId: job.id }
   await persistPublishDraft(confirmed)
   return { draft: confirmed, job }
 }
