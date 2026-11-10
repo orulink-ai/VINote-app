@@ -16,7 +16,7 @@ test('deleting a meeting trashes its linked notes before removing the original',
   jest.mocked(FS.readFile).mockResolvedValue(JSON.stringify(record))
   jest.mocked(listNotes).mockResolvedValue([{ id: 'note-one', task_id: 'one' }, { id: 'other', task_id: 'another' }] as never)
   await deleteRecording(record)
-  expect(setNoteDeleted).toHaveBeenCalledWith('note-one', true, 'alice')
+  expect(setNoteDeleted).toHaveBeenCalledWith('note-one', true, 'alice', 'one')
   expect(setNoteDeleted).not.toHaveBeenCalledWith('other', true, 'alice')
   expect(jest.mocked(setNoteDeleted).mock.invocationCallOrder[0]).toBeLessThan(jest.mocked(FS.unlink).mock.invocationCallOrder[0])
 })

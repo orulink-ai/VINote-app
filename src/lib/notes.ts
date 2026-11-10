@@ -2,6 +2,11 @@ import Storage from '@react-native-async-storage/async-storage'
 import { ApiError } from './errors'
 import { devReadSync as measureRead, devReadTiming as startRead, readAccountId, sessionRevision } from './storage'
 import type { Note } from '../types/api'
+import { withFeishuAutoLock } from './feishuAutoMutex'
+import { removeFeishuAutomatic } from './feishuAutomaticQueue'
+import { assertPublishCanBeDeleted, redactDeletedPublish } from './feishuPublishReceipt'
+import * as recordingLibrary from '../features/recording/recordingLibrary'
+import { acquireRecordingLock } from '../features/recording/recordingProcessing'
 import FS from 'react-native-fs'
 import Share from 'react-native-share'
 import { readWorkspace, readWorkspaceSnapshot, workspaceViews, workspaceNote, type WorkspaceState } from './workspaceStorage'
@@ -239,7 +244,10 @@ export async function renameNote(id: string, title: string) {
 export async function deleteNote(id: string) {
   return setNoteDeleted(id, true)
 }
-export async function setNoteDeleted(id: string, deleted: boolean, expectedOwner?: string) {
+export async function setNoteDeleted(id: string, deleted: boolean, expectedOwner?: string, heldRecordingId?: string) {
+  return withFeishuAutoLock(() => setNoteDeletedLocked(id, deleted, expectedOwner, heldRecordingId))
+}
+async function setNoteDeletedLocked(id: string, deleted: boolean, expectedOwner?: string, heldRecordingId?: string) {
   const scope = await captureReadScope(expectedOwner), owner = scope.owner, namespace = `vinote:${owner}:note:`
   const state = await localLibrary(owner)
   await checkReadScope(scope)
@@ -248,9 +256,29 @@ export async function setNoteDeleted(id: string, deleted: boolean, expectedOwner
   const note = resolveNote(id, value, state)
   const locals = await listLocalNotes(owner)
   const originalMapping = Object.values(state.mappings).find(row => row.localIds.includes(id) || row.key === note.workspace_key)
-  for (const row of [note, ...locals.filter(row => row.id !== note.id && ((row.content_id && row.content_id === note.content_id) || originalMapping?.localIds.includes(row.id)))]) {
+  const related = [note, ...locals.filter(row => row.id !== note.id && ((row.content_id && row.content_id === note.content_id) || originalMapping?.localIds.includes(row.id)))]
+  if (deleted) {
+    const receiptKeys = [...new Set(related.flatMap(row => [row.id, row.workspace_key]).concat(originalMapping?.key).filter((value): value is string => !!value))]
+    for (const receiptKey of receiptKeys) await assertPublishCanBeDeleted(owner, receiptKey)
+    const taskIds = new Set(related.map(row => row.task_id).filter((value): value is string => !!value))
+    if (taskIds.size) {
+      for (const record of await recordingLibrary.listRecordings()) {
+        if (!taskIds.has(record.id) || !record.autoHandoff || !related.some(row => row.id === record.autoHandoff?.note.id)) continue
+        const release = heldRecordingId === record.id ? undefined : acquireRecordingLock(owner, record.id)
+        try {
+          const latest = (await recordingLibrary.listRecordings()).find(item => item.id === record.id)
+          if (!latest) continue
+          if (latest.generation) throw new Error('会议正在生成纪要，请完成后再删除')
+          if (latest.autoHandoff && related.some(row => row.id === latest.autoHandoff?.note.id)) await recordingLibrary.saveRecording({ ...latest, autoHandoff: undefined, autoPublishError: undefined })
+        } finally { release?.() }
+      }
+    }
+    for (const receiptKey of receiptKeys) await redactDeletedPublish(owner, receiptKey)
+  }
+  for (const row of related) {
     await checkReadScope(scope)
     await Storage.setItem(`${namespace}${row.id}`, JSON.stringify({ ...row, deleted }))
+    if (deleted) await removeFeishuAutomatic(owner, row.id)
   }
   const mapping = originalMapping
   const key = note.workspace_key || mapping?.key
