@@ -26,7 +26,7 @@ import type { Note } from '../types/api'
 import { FeishuDestinationPicker } from './FeishuDestinationPicker'
 import { SettingsCheckbox } from './SettingsCheckbox'
 import { readAccountId } from '../lib/storage'
-import { hasFeishuLocalPreferences, readFeishuLocalPreferences } from '../lib/feishuLocalPreferences'
+import { readFeishuLocalPreferencesState } from '../lib/feishuLocalPreferences'
 import { newPublishDraft, readPublishDraft, persistPublishDraft, queryPublishReceipt, type PublishDraft } from '../lib/feishuPublishReceipt'
 import { hasPublishReview, reviewPublishOptions, type PublishReview } from '../lib/feishuPublishReview'
 import { deliverySettingsReturn, type FeishuDeliveryReturn } from '../lib/feishuDeliveryReturn'
@@ -165,13 +165,11 @@ export function FeishuDeliveryPanel({
       setReceiptSupported(settings.publish_receipt_protocol === 1)
       setContactProtocol(settings.contact_selection_protocol === 1)
       setContactSupported(settings.contact_selection_protocol === 1 && settings.capabilities?.contact_search === true && settings.connected && !settings.expired)
-      const savedLocally = await hasFeishuLocalPreferences(owner)
+      const local = await readFeishuLocalPreferencesState(owner)
       if (sequence !== requestSequence.current) return
-      setLocalDefaults(!savedLocally)
+      setLocalDefaults(!local.exists)
       if (!initialized.current) {
-        const localPreferences = await readFeishuLocalPreferences(owner)
-        if (sequence !== requestSequence.current) return
-        setOptions(localPreferences)
+        setOptions(local.preferences)
         initialized.current = true
       }
       const recovered = pending ? await queryRetryReceipt(pending) : null

@@ -1,5 +1,5 @@
 import Storage from '@react-native-async-storage/async-storage'
-import { readFeishuLocalPreferences, saveFeishuLocalPreferences } from '../src/lib/feishuLocalPreferences'
+import { readFeishuLocalPreferences, readFeishuLocalPreferencesState, saveFeishuLocalPreferences } from '../src/lib/feishuLocalPreferences'
 import { transitionIdentity } from '../src/lib/sessionIdentity'
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
 beforeEach(() => { jest.clearAllMocks(); transitionIdentity('owner') })
@@ -17,4 +17,14 @@ test('rejects another account', async () => {
 test('does not silently use invalid local preferences', async () => {
   jest.mocked(Storage.getItem).mockResolvedValueOnce('{"groups":"bad"}')
   await expect(readFeishuLocalPreferences('owner')).rejects.toThrow('本机飞书设置无法读取')
+})
+test('preference values and existence come from the same storage read', async () => {
+  jest.mocked(Storage.getItem).mockResolvedValueOnce(null).mockResolvedValueOnce(JSON.stringify({ notify_self: false, groups: [], destination_config: { kind: 'personal' }, permission_policy: 'private' }))
+  const first = await readFeishuLocalPreferencesState('owner')
+  expect(first.exists).toBe(false)
+  expect(first.preferences.notify_self).toBe(true)
+  expect(Storage.getItem).toHaveBeenCalledTimes(1)
+  const second = await readFeishuLocalPreferencesState('owner')
+  expect(second.exists).toBe(true)
+  expect(second.preferences.notify_self).toBe(false)
 })

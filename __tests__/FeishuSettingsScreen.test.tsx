@@ -7,19 +7,19 @@ import { SettingsCheckbox } from '../src/components/SettingsCheckbox'
 import { ScreenHeader } from '../src/components/ScreenHeader'
 import { FeishuDestinationPicker } from '../src/components/FeishuDestinationPicker'
 import { Alert } from 'react-native'
-import { hasFeishuLocalPreferences, readFeishuLocalPreferences, saveFeishuLocalPreferences } from '../src/lib/feishuLocalPreferences'
+import { readFeishuLocalPreferencesState, saveFeishuLocalPreferences } from '../src/lib/feishuLocalPreferences'
 import { readAccountId } from '../src/lib/storage'
 import { transitionIdentity } from '../src/lib/sessionIdentity'
 jest.mock('../src/lib/feishu', () => ({ feishuApi: jest.fn() }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
-jest.mock('../src/lib/feishuLocalPreferences', () => ({ hasFeishuLocalPreferences: jest.fn(async () => true), readFeishuLocalPreferences: jest.fn(async () => ({ notify_self: true, groups: [], destination_config: { kind: 'personal' }, permission_policy: 'private' })), saveFeishuLocalPreferences: jest.fn(async () => {}) }))
+jest.mock('../src/lib/feishuLocalPreferences', () => ({ readFeishuLocalPreferencesState: jest.fn(async () => ({ exists: true, preferences: { notify_self: true, groups: [], destination_config: { kind: 'personal' }, permission_policy: 'private' } })), saveFeishuLocalPreferences: jest.fn(async () => {}) }))
 // These tests exercise preferences and connection state. Application credential
 // management has separate requests and is not covered by this unit fixture.
 jest.mock('../src/components/FeishuApplicationSetup', () => ({ FeishuApplicationSetup: () => null }))
 afterEach(() => jest.clearAllMocks())
 
 test('first use explains local defaults and allows saving them explicitly', async () => {
-  jest.mocked(hasFeishuLocalPreferences).mockResolvedValueOnce(false)
+  jest.mocked(readFeishuLocalPreferencesState).mockResolvedValueOnce({ exists: false, preferences: { notify_self: true, groups: [], destination_config: { kind: 'personal' }, permission_policy: 'private' } })
   jest.mocked(feishuApi).mockResolvedValueOnce({ configured: true, connected: true, expired: false, name: '测试', notify_self: true, groups: [], auto_publish: false }).mockResolvedValueOnce([])
   let view!: Renderer.ReactTestRenderer
   await act(async () => { view = Renderer.create(<FeishuSettingsScreen onBack={jest.fn()} />) })
@@ -125,7 +125,7 @@ test('a failed status read leaves account connection disabled', async () => {
 test('group refresh errors and retry remain in the picker without clearing choices', async () => {
   const status = { configured: true, connected: true, expired: false, name: '测试', notify_self: true, groups: ['g1'], auto_publish: false }
   const groups = [{ chat_id: 'g1', name: '项目群' }]
-  jest.mocked(readFeishuLocalPreferences).mockResolvedValueOnce({ notify_self: true, groups: ['g1'], destination_config: { kind: 'personal' }, permission_policy: 'private' })
+  jest.mocked(readFeishuLocalPreferencesState).mockResolvedValueOnce({ exists: true, preferences: { notify_self: true, groups: ['g1'], destination_config: { kind: 'personal' }, permission_policy: 'private' } })
   jest.mocked(feishuApi).mockResolvedValueOnce(status).mockResolvedValueOnce(groups).mockRejectedValueOnce(new Error('暂时断网')).mockResolvedValueOnce(groups)
   let view!: Renderer.ReactTestRenderer
   await act(async () => { view = Renderer.create(<FeishuSettingsScreen onBack={jest.fn()} />) })

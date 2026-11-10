@@ -23,7 +23,7 @@ import { colors, styles } from '../design-system/theme'
 import { FeishuApplicationSetup } from '../components/FeishuApplicationSetup'
 import { FeishuDestinationPicker } from '../components/FeishuDestinationPicker'
 import { readAccountId } from '../lib/storage'
-import { hasFeishuLocalPreferences, readFeishuLocalPreferences, saveFeishuLocalPreferences } from '../lib/feishuLocalPreferences'
+import { readFeishuLocalPreferencesState, saveFeishuLocalPreferences } from '../lib/feishuLocalPreferences'
 import { identityEpoch, subscribeIdentity } from '../lib/sessionIdentity'
 
 export function FeishuSettingsScreen({ onBack, navigationGuard }: {
@@ -56,12 +56,13 @@ export function FeishuSettingsScreen({ onBack, navigationGuard }: {
     try {
       const owner = await readAccountId()
       if (!owner) throw new Error('请重新登录')
-      const next = { ...await feishuApi<FeishuStatus>('/status', {}, owner), ...await readFeishuLocalPreferences(owner), auto_publish: false }
-      const savedLocally = await hasFeishuLocalPreferences(owner)
+      const status = await feishuApi<FeishuStatus>('/status', {}, owner)
+      const local = await readFeishuLocalPreferencesState(owner)
+      const next = { ...status, ...local.preferences, auto_publish: false }
       if (identityEpoch() !== epoch || await readAccountId() !== owner || identityEpoch() !== epoch) return false
       const sameDraft = draftScope.current?.owner === owner && draftScope.current?.epoch === epoch
       draftScope.current = { owner, epoch }
-      setLocalDefaults(!savedLocally)
+      setLocalDefaults(!local.exists)
       setValue(current => dirty && preserveDraft && sameDraft && current ? { ...next, notify_self: current.notify_self, groups: current.groups, auto_publish: current.auto_publish, destination_config: current.destination_config, permission_policy: current.permission_policy } : next)
       if (!preserveDraft || !dirty) setDirty(false)
       setGroupError('')
