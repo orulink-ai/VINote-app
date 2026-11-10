@@ -10,13 +10,30 @@ import { Alert } from 'react-native'
 import { readFeishuLocalPreferencesState, saveFeishuLocalPreferences } from '../src/lib/feishuLocalPreferences'
 import { readAccountId } from '../src/lib/storage'
 import { transitionIdentity } from '../src/lib/sessionIdentity'
-jest.mock('../src/lib/feishu', () => ({ feishuApi: jest.fn() }))
+import { saveFeishuAutoConsent } from '../src/lib/feishuAutoConsent'
+import { reviewPublishOptions } from '../src/lib/feishuPublishReview'
+jest.mock('../src/lib/feishu', () => ({ feishuApi: jest.fn(), newSnapshotPublishOptions: (options: object) => options, assertFeishuPublishReady: jest.fn(async () => {}) }))
+jest.mock('../src/lib/feishuAutoConsent', () => ({ readFeishuAutoConsent: jest.fn(async () => null), saveFeishuAutoConsent: jest.fn(async () => {}) }))
+jest.mock('../src/lib/feishuPublishReview', () => ({ reviewPublishOptions: jest.fn(async () => ({})), publishOptionsSignature: jest.fn(() => 'settings-hash') }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
 jest.mock('../src/lib/feishuLocalPreferences', () => ({ readFeishuLocalPreferencesState: jest.fn(async () => ({ exists: true, preferences: { notify_self: true, groups: [], destination_config: { kind: 'personal' }, permission_policy: 'private' } })), saveFeishuLocalPreferences: jest.fn(async () => {}) }))
 // These tests exercise preferences and connection state. Application credential
 // management has separate requests and is not covered by this unit fixture.
 jest.mock('../src/components/FeishuApplicationSetup', () => ({ FeishuApplicationSetup: () => null }))
 afterEach(() => jest.clearAllMocks())
+
+test('enabling automatic delivery saves consent bound to this device settings and connection', async () => {
+  const status = { configured: true, connected: true, expired: false, name: '测试', notify_self: true, groups: [], auto_publish: false, device_bound_publish_protocol: 1, connection_binding_hash: 'binding' }
+  jest.mocked(feishuApi).mockResolvedValueOnce(status).mockResolvedValueOnce([]).mockResolvedValueOnce(status)
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<FeishuSettingsScreen onBack={jest.fn()} />) })
+  const toggle = view.root.findAllByType(SettingsCheckbox).find(node => node.props.label === '生成后自动发布并通知')!
+  await act(async () => toggle.props.onChange(true))
+  await act(async () => view.root.findAllByType(PrimaryButton).find(node => node.props.title === '保存设置')!.props.onPress())
+  expect(reviewPublishOptions).toHaveBeenCalled()
+  expect(saveFeishuAutoConsent).toHaveBeenCalledWith('owner', expect.objectContaining({ connectionBinding: 'binding', settingsFingerprint: 'settings-hash', consentId: expect.any(String) }))
+  await act(async () => view.unmount())
+})
 
 test('first use explains local defaults and allows saving them explicitly', async () => {
   jest.mocked(readFeishuLocalPreferencesState).mockResolvedValueOnce({ exists: false, preferences: { notify_self: true, groups: [], destination_config: { kind: 'personal' }, permission_policy: 'private' } })
@@ -134,7 +151,7 @@ test('group refresh errors and retry remain in the picker without clearing choic
   const refresh = () => view.root.findAllByType(PrimaryButton).filter(node => node.props.title === '刷新群列表').at(-1)!
   await act(async () => refresh().props.onPress())
   expect(JSON.stringify(view.toJSON())).toContain('暂时断网')
-  expect(view.root.findAll(node => node.props.accessibilityRole === 'checkbox' && node.props.accessibilityLabel !== '发给我本人' && node.props.accessibilityLabel !== '发给指定群')[0].props.accessibilityState.checked).toBe(true)
+  expect(view.root.findAll(node => node.props.accessibilityRole === 'checkbox' && node.props.accessibilityLabel == null)[0].props.accessibilityState.checked).toBe(true)
   await act(async () => refresh().props.onPress())
   expect(JSON.stringify(view.toJSON())).not.toContain('暂时断网')
   await act(async () => view.unmount())

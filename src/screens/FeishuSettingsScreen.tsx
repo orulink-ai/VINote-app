@@ -13,7 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
-import { feishuApi, type FeishuGroup, type FeishuStatus, type FeishuAuthorization } from '../lib/feishu'
+import { feishuApi, newSnapshotPublishOptions, assertFeishuPublishReady, type FeishuGroup, type FeishuStatus, type FeishuAuthorization } from '../lib/feishu'
 import { SettingsCheckbox } from '../components/SettingsCheckbox'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { WorkspaceIcon } from '../components/WorkspaceIcon'
@@ -24,6 +24,10 @@ import { FeishuApplicationSetup } from '../components/FeishuApplicationSetup'
 import { FeishuDestinationPicker } from '../components/FeishuDestinationPicker'
 import { readAccountId } from '../lib/storage'
 import { readFeishuLocalPreferencesState, saveFeishuLocalPreferences } from '../lib/feishuLocalPreferences'
+import { readFeishuAutoConsent, saveFeishuAutoConsent } from '../lib/feishuAutoConsent'
+import { publishOptionsSignature, reviewPublishOptions } from '../lib/feishuPublishReview'
+import { withFeishuAutoLock } from '../lib/feishuAutoMutex'
+import { operationId } from '../lib/integration'
 import { identityEpoch, subscribeIdentity } from '../lib/sessionIdentity'
 
 export function FeishuSettingsScreen({ onBack, navigationGuard }: {
@@ -58,7 +62,8 @@ export function FeishuSettingsScreen({ onBack, navigationGuard }: {
       if (!owner) throw new Error('请重新登录')
       const status = await feishuApi<FeishuStatus>('/status', {}, owner)
       const local = await readFeishuLocalPreferencesState(owner)
-      const next = { ...status, ...local.preferences, auto_publish: false }
+      const consent = await readFeishuAutoConsent(owner)
+      const next = { ...status, ...local.preferences, auto_publish: !!consent }
       if (identityEpoch() !== epoch || await readAccountId() !== owner || identityEpoch() !== epoch) return false
       const sameDraft = draftScope.current?.owner === owner && draftScope.current?.epoch === epoch
       draftScope.current = { owner, epoch }
@@ -278,6 +283,11 @@ export function FeishuSettingsScreen({ onBack, navigationGuard }: {
           {groupError ? <PrimaryButton tertiary style={{ alignSelf: 'flex-start' }} title="刷新群列表" disabled={!!disabled} loading={busy} onPress={() => void refreshGroups()} /> : null}
           {groupError ? <Text accessibilityRole="alert" style={{ color: colors.danger }}>{groupError}，已选群继续保留，请重试刷新。</Text> : null}
         </View>}
+        {value && <View style={section}>
+          <Text style={styles.noteTitle}>自动发布会议纪要</Text>
+          <Text style={styles.subtitle}>生成完成后，按本机保存的位置和通知对象发布。更改飞书连接或设置后需要重新确认。</Text>
+          <SettingsCheckbox label="生成后自动发布并通知" disabled={!!disabled} checked={value.auto_publish} onChange={checked => change({ auto_publish: checked })} />
+        </View>}
         <FeishuApplicationSetup onChanged={() => void load(false)} />
       </ScrollView>
       {(dirty || localDefaults) && <View
@@ -309,7 +319,20 @@ export function FeishuSettingsScreen({ onBack, navigationGuard }: {
               const owner = await readAccountId()
               if (!owner) throw new Error('请重新登录')
               if (!scope || scope.owner !== owner || scope.epoch !== identityEpoch()) throw new Error('账号已切换，请重新打开飞书设置')
-              await saveFeishuLocalPreferences(owner, { notify_self: value.notify_self, groups: value.groups, destination_config: value.destination_config || { kind: 'personal' }, permission_policy: value.permission_policy || 'private' })
+              await withFeishuAutoLock(async () => {
+              const preferences = { notify_self: value.notify_self, groups: value.groups, destination_config: value.destination_config || { kind: 'personal' as const }, permission_policy: value.permission_policy || 'private' as const }
+              const options = newSnapshotPublishOptions(preferences)
+              let binding = ''
+              if (value.auto_publish) {
+                await assertFeishuPublishReady(owner)
+                const status = await feishuApi<FeishuStatus>('/status', {}, owner)
+                if (status.device_bound_publish_protocol !== 1 || !status.connection_binding_hash) throw new Error('当前飞书服务尚不支持本机自动发布，请更新服务后重试')
+                await reviewPublishOptions(owner, options)
+                binding = status.connection_binding_hash
+              } else await saveFeishuAutoConsent(owner, null)
+              await saveFeishuLocalPreferences(owner, preferences)
+              if (value.auto_publish) await saveFeishuAutoConsent(owner, { connectionBinding: binding, settingsFingerprint: publishOptionsSignature(options), consentId: operationId() })
+              })
               setLocalDefaults(false)
               setDirty(false)
               setMessage('设置已保存')

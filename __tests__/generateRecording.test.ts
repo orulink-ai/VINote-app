@@ -1,5 +1,5 @@
 import { ASRServiceFailure, readASRDiagnostic, withASRDiagnostic } from '../src/lib/asrFailure'
-import { generateRecording, resumePendingRecordings } from '../src/features/recording/generateRecording'
+import { generateRecording, resumePendingRecordings, recoverAutomaticHandoffs } from '../src/features/recording/generateRecording'
 import { listRecordings, saveRecording } from '../src/features/recording/recordingLibrary'
 import { transcribe, summarize } from '../src/lib/meetingCloud'
 import { createNote, getNote, nextNoteVersion } from '../src/lib/notes'
@@ -12,6 +12,11 @@ import { acquireGenerationSlot, subscribeGenerationProgress } from '../src/featu
 import { NativeModules } from 'react-native'
 import { prepareMeetingFile } from '../src/lib/prepareMeetingFile'
 import { runPreparedMeetingFile } from '../src/lib/meetingFileAdapter'
+import { createAutomaticHandoff } from '../src/lib/feishuAutomaticQueue'
+import { processFeishuAutomatic } from '../src/lib/feishuAutomaticWorker'
+import { persistAutomaticHandoff } from '../src/lib/feishuAutomaticQueue'
+jest.mock('../src/lib/feishuAutomaticQueue', () => ({ createAutomaticHandoff: jest.fn(async () => null), persistAutomaticHandoff: jest.fn(async () => {}) }))
+jest.mock('../src/lib/feishuAutomaticWorker', () => ({ processFeishuAutomatic: jest.fn(async () => {}) }))
 jest.mock('../src/lib/prepareMeetingFile', () => ({ prepareMeetingFile: jest.fn() }))
 jest.mock('../src/lib/meetingFileAdapter', () => ({ runPreparedMeetingFile: jest.fn() }))
 jest.mock('../src/features/recording/recordingLibrary', () => ({ saveRecording: jest.fn(async value => value), listRecordings: jest.fn(async () => []) }))
@@ -20,6 +25,18 @@ jest.mock('../src/lib/meetingCloud', () => ({ transcribe: jest.fn(), summarize: 
 jest.mock('../src/lib/notes', () => ({ createNote: jest.fn(), getNote: jest.fn(), nextNoteVersion: jest.fn(async () => 1), noteIdForVersion: jest.fn((id, version) => `app-${id}${version === 1 ? '' : `-v${version}`}`) }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'alice') }))
 jest.mock('../src/lib/models', () => ({ loadSelection: jest.fn(async () => ({ asr_model: 'asr1', llm_model: 'llm1' })), loadModels: jest.fn(async () => [{ id: 'asr1', modelType: 'asr', runtimeStatus: 'available' }, { id: 'llm1', modelType: 'llm', runtimeStatus: 'available' }]) }))
+
+test('recovers a frozen handoff when a summary-only note was saved before a crash', async () => {
+  const note = { id: 'app-rec-v2', task_id: 'rec', title: '标题', content: '正文', version: 2, status: 'done' }
+  const handoff = { owner: 'alice', origin: 'server', operationId: 'original', note: { id: note.id, title: note.title, content: note.content }, consent: { connectionBinding: 'binding', settingsFingerprint: 'settings', consentId: 'consent' }, options: {}, state: 'prepared' as const }
+  const record = { id: 'rec', uri: 'file:///rec.m4a', title: '录音', createdAt: '', duration: 10, autoHandoff: handoff, generation: { status: 'paused' as const, version: 2, asrModel: 'asr', llmModel: 'llm', startedAt: '', summaryOnly: { evidenceKey: 'evidence' } } }
+  jest.mocked(listRecordings).mockResolvedValue([record])
+  jest.mocked(getNote).mockResolvedValue(note as never)
+  await recoverAutomaticHandoffs('alice')
+  expect(persistAutomaticHandoff).toHaveBeenCalledWith(handoff)
+  expect(saveRecording).toHaveBeenCalledWith(expect.objectContaining({ id: 'rec', autoHandoff: undefined }))
+  expect(processFeishuAutomatic).toHaveBeenCalledWith('alice', note.id)
+})
 
 test('worker forwards independent typed submission and confirmed coverage without parsing legacy percent', async () => {
   let finish!: (text: string) => void
@@ -46,6 +63,17 @@ beforeEach(() => {
   ])
   jest.mocked(nextNoteVersion).mockResolvedValue(1)
   jest.mocked(getNote).mockRejectedValue(new ApiError('本机未找到这份纪要', 404))
+})
+
+test('the frozen automatic handoff is durable before the minutes are saved', async () => {
+  jest.mocked(createAutomaticHandoff).mockImplementationOnce(async (owner, note) => ({ owner, origin: 'server', operationId: 'frozen', note, consent: { connectionBinding: 'binding', settingsFingerprint: 'settings', consentId: 'consent' }, options: {}, state: 'prepared' }))
+  jest.mocked(createNote).mockImplementationOnce(async (payload, _owner, version) => ({ ...payload, id: `app-handoff${version === 1 ? '' : `-v${version}`}` } as never))
+  await generateRecording({ id: 'handoff', uri: 'file:///handoff.m4a', title: '录音', createdAt: '', duration: 10 }, () => {})
+  const durable = jest.mocked(saveRecording).mock.calls.findIndex(([value]) => !!value.autoHandoff)
+  expect(durable).toBeGreaterThanOrEqual(0)
+  expect(jest.mocked(saveRecording).mock.invocationCallOrder[durable]).toBeLessThan(jest.mocked(createNote).mock.invocationCallOrder[0])
+  expect(persistAutomaticHandoff).toHaveBeenCalledWith(expect.objectContaining({ operationId: 'frozen' }))
+  expect(processFeishuAutomatic).toHaveBeenCalledWith('alice', 'app-handoff')
 })
 
 test('a supported whole-file meeting model persists its original job and uses the completed result without streaming', async () => {

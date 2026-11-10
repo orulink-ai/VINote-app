@@ -17,6 +17,9 @@ import { listRecordings, type LocalRecording } from '../features/recording/recor
 import { useRecordingProgress } from '../features/recording/useRecordingProgress'
 import { mcpApi, runLabels, type MCPRun } from '../lib/mcp'
 import { flushAutomaticDeliveries } from '../lib/feishu'
+import { listFeishuAutomaticIds, readFeishuAutomatic } from '../lib/feishuAutomaticQueue'
+import { processFeishuAutomatic } from '../lib/feishuAutomaticWorker'
+import { readPublishDraft } from '../lib/feishuPublishReceipt'
 import { readCurrentIntakeHistory, sameIntakeHistoryTarget, type IntakeHistoryRecord, type IntakeHistoryTarget } from '../lib/intakeHistory'
 import { listClientNoteHistory, savedNoteForClientTask, type ClientNoteHistoryItem } from '../lib/clientNoteHistoryList'
 import { listNotes } from '../lib/notes'
@@ -28,6 +31,7 @@ const pageViews = new Map<string, { category: string; y: number }>()
 export function TasksScreen({ onBack, onOpen, onRecording, onMcp, onIntake, dataOnly = false, showBack = dataOnly, backLabel = '返回我的' }: { onBack?: () => void; backLabel?: string; onOpen: (id: string) => void; onRecording: (id: string) => void; onMcp: () => void; onIntake?: (target: IntakeHistoryTarget) => void; dataOnly?: boolean; showBack?: boolean }) {
   const [state, setState] = useState<WorkspaceState>({ cache: {}, mappings: {} }), [records, setRecords] = useState<LocalRecording[]>([])
   const [jobs, setJobs] = useState<Job[]>([]), [runs, setRuns] = useState<MCPRun[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState('')
+  const [automaticJobs, setAutomaticJobs] = useState<{ id: string; title: string; state: string }[]>([])
   const [storage, setStorage] = useState(''), [category, setCategory] = useState(dataOnly ? '存储' : '生成')
   const [recordsReady, setRecordsReady] = useState(false)
   const [intake, setIntake] = useState<IntakeHistoryRecord | null>(null), [intakeError, setIntakeError] = useState(''), [intakeDetails, setIntakeDetails] = useState(false)
@@ -101,6 +105,18 @@ export function TasksScreen({ onBack, onOpen, onRecording, onMcp, onIntake, data
   }, [])
   const refresh = async () => {
     await local()
+    if (category === '飞书') {
+      const owner = await readAccountId(), revision = sessionRevision()
+      if (!owner) throw new Error('请重新登录后查看发布任务')
+      const ids = await listFeishuAutomaticIds(owner)
+      const entries = await Promise.all(ids.map(async id => {
+        const intent = await readFeishuAutomatic(owner, id)
+        const receipt = await readPublishDraft(owner, id)
+        return intent ? { id, title: intent.note.title, state: receipt?.jobPhase === 'unknown' ? 'unknown' : receipt?.jobStatus || receipt?.state || 'prepared' } : null
+      }))
+      if (await readAccountId() !== owner || sessionRevision() !== revision) throw new Error('账号已切换，请重新读取任务')
+      setAutomaticJobs(entries.filter((item): item is { id: string; title: string; state: string } => !!item))
+    }
     if (category === 'MCP') setRuns((await mcpApi<{ runs: MCPRun[] }>('/runs?limit=50&offset=0')).runs)
     if (category === '存储') {
       const files = await listRecordings(); let bytes = 0, count = 0
@@ -117,6 +133,11 @@ export function TasksScreen({ onBack, onOpen, onRecording, onMcp, onIntake, data
     if (dataOnly || category !== '生成') return
     // Poll only local task state. Reading it never submits or retries a model request.
     const timer = setInterval(() => { if (AppState.currentState === 'active') void local().catch(() => {}) }, 3000)
+    return () => clearInterval(timer)
+  }, [category, dataOnly])
+  useEffect(() => {
+    if (dataOnly || category !== '飞书') return
+    const timer = setInterval(() => { if (AppState.currentState === 'active' && !lock.current) void refresh().catch(() => {}) }, 5000)
     return () => clearInterval(timer)
   }, [category, dataOnly])
   const meetingTasks = records.filter(record => record.generation || record.error || progress?.recordId === record.id || historyNotes.some(note => !note.deleted && note.id === record.noteId && note.task_id === record.id))
@@ -148,7 +169,11 @@ export function TasksScreen({ onBack, onOpen, onRecording, onMcp, onIntake, data
         </Pressable>)}
         {!busy && recordsReady && !intake && !intakeError && !historyError && history.length === 0 && meetingTasks.length === 0 && <Text style={styles.subtitle}>暂无任务。生成会议纪要或笔记后，可在这里查看进度。</Text>}
       </>}
-      {category === '飞书' && <><Text style={styles.noteTitle}>查看发布状态</Text><Text style={styles.subtitle}>打开会议纪要或笔记，选择“发布到飞书”，可查看文档和通知状态。当前需手动发布，旧的自动发布记录可核对，但不会自动重发。</Text><PrimaryButton secondary title="核对旧发布记录" disabled={busy} onPress={() => void action(async () => { await flushAutomaticDeliveries(); Alert.alert('没有待核对的旧发布记录') })} /></>}
+      {category === '飞书' && <><Text style={styles.noteTitle}>飞书发布</Text><Text style={styles.subtitle}>查看本机自动发布任务。结果未确认时只查询原操作，不重复发送。</Text>
+        {records.filter(record => record.autoPublishError).map(record => <View key={record.id} style={styles.listRow}><Text style={styles.noteTitle}>{record.title}</Text><Text accessibilityRole="alert" style={styles.subtitle}>自动发布未启动：{record.autoPublishError}。纪要已保存，可打开后手动发布。</Text><PrimaryButton tertiary title="查看会议" onPress={() => onRecording(record.id)} /></View>)}
+        {automaticJobs.map(job => <View key={job.id} style={styles.listRow}><Text style={styles.noteTitle}>{job.title}</Text><Text style={styles.subtitle}>{job.state === 'completed' ? '发布与通知已完成' : job.state === 'failed' ? '发布未完成，请打开纪要查看原因' : job.state === 'unknown' ? '结果待确认' : ['queued', 'processing', 'acknowledged'].includes(job.state) ? '正在发布与通知' : '等待发布'}</Text><PrimaryButton secondary title={['completed', 'failed'].includes(job.state) ? '查看纪要' : '核验并继续'} disabled={busy} onPress={() => ['completed', 'failed'].includes(job.state) ? onOpen(job.id) : void action(async () => { const owner = await readAccountId(); if (!owner) throw new Error('请重新登录'); await processFeishuAutomatic(owner, job.id); await refresh() })} /></View>)}
+        {!automaticJobs.length && <Text style={styles.subtitle}>暂无自动发布任务</Text>}
+        <PrimaryButton tertiary title="核对旧发布记录" disabled={busy} onPress={() => void action(async () => { await flushAutomaticDeliveries(); Alert.alert('没有待核对的旧发布记录') })} /></>}
       {category === 'MCP' && <><PrimaryButton title="管理工具与调用" onPress={onMcp} />{runs.map(run => <View key={run.id} style={styles.listRow}><Text style={styles.noteTitle}>{run.toolName} · {runLabels[run.status]}</Text><Text style={styles.subtitle}>{run.error?.message}</Text></View>)}</>}
       {category === '存储' && <><Text style={styles.noteBody}>{storage || '点刷新读取本机占用。'}</Text><Text style={styles.subtitle}>正文与版本保留在资料库；原文件在文件库独立管理。</Text>{records.map(record => <PrimaryButton key={record.id} tertiary title={`${record.title} · 查看原文件`} onPress={() => onRecording(record.id)} />)}</>}
       <AsyncState error={error} retryLabel="重新读取状态" onRetry={() => void action(refresh)} />
