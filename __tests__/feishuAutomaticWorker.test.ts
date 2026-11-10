@@ -39,6 +39,16 @@ test('queued accepted operation resumes only its own server job', async () => {
   expect(publishToFeishu).not.toHaveBeenCalled()
 })
 
+test('a durable rejection is surfaced without resubmitting', async () => {
+  const intent = { owner: 'owner', note: { id: 'note', title: '标题', content: '正文' }, operationId: 'op', consent: {}, options: {}, state: 'prepared' }
+  jest.mocked(readFeishuAutomatic).mockResolvedValue(intent as never)
+  jest.mocked(readPublishDraft).mockResolvedValue({ owner: 'owner', noteKey: 'note', operationId: 'op', state: 'unknown' } as never)
+  require('../src/lib/feishu').feishuApi.mockResolvedValue({ state: 'rejected', operation_id: 'op' })
+  await processFeishuAutomatic('owner', 'note')
+  expect(require('../src/lib/feishuPublishReceipt').persistPublishDraft).toHaveBeenCalledWith(expect.objectContaining({ jobPhase: 'rejected', jobStatusVerified: true }))
+  expect(publishToFeishu).not.toHaveBeenCalled()
+})
+
 test('a changed Feishu connection stops the prepared task without sending', async () => {
   const consent = { connectionBinding: 'old', settingsFingerprint: 'fingerprint', consentId: 'id' }
   const options = { notify_self: true, groups: [] }
