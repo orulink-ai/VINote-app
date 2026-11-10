@@ -148,7 +148,7 @@ export function TasksScreen({ onBack, onOpen, onRecording, onMcp, onIntake, data
         </Pressable>)}
         {!busy && recordsReady && !intake && !intakeError && !historyError && history.length === 0 && meetingTasks.length === 0 && <Text style={styles.subtitle}>暂无任务。生成会议纪要或笔记后，可在这里查看进度。</Text>}
       </>}
-      {category === '飞书' && <><Text style={styles.noteTitle}>查看发布状态</Text><Text style={styles.subtitle}>打开会议纪要或笔记，选择“发布到飞书”，可查看文档和通知状态。</Text><PrimaryButton secondary title="恢复自动发布" disabled={busy} onPress={() => Alert.alert('恢复自动交付？', '仅处理此前启用自动交付的已保存内容，可能继续创建文档或通知。', [{ text: '取消' }, { text: '恢复', onPress: () => void action(flushAutomaticDeliveries) }])} /></>}
+      {category === '飞书' && <><Text style={styles.noteTitle}>查看发布状态</Text><Text style={styles.subtitle}>打开会议纪要或笔记，选择“发布到飞书”，可查看文档和通知状态。当前需手动发布，旧的自动发布记录可核对，但不会自动重发。</Text><PrimaryButton secondary title="核对旧发布记录" disabled={busy} onPress={() => void action(async () => { await flushAutomaticDeliveries(); Alert.alert('没有待核对的旧发布记录') })} /></>}
       {category === 'MCP' && <><PrimaryButton title="管理工具与调用" onPress={onMcp} />{runs.map(run => <View key={run.id} style={styles.listRow}><Text style={styles.noteTitle}>{run.toolName} · {runLabels[run.status]}</Text><Text style={styles.subtitle}>{run.error?.message}</Text></View>)}</>}
       {category === '存储' && <><Text style={styles.noteBody}>{storage || '点刷新读取本机占用。'}</Text><Text style={styles.subtitle}>正文与版本保留在资料库；原文件在文件库独立管理。</Text>{records.map(record => <PrimaryButton key={record.id} tertiary title={`${record.title} · 查看原文件`} onPress={() => onRecording(record.id)} />)}</>}
       <AsyncState error={error} retryLabel="重新读取状态" onRetry={() => void action(refresh)} />
