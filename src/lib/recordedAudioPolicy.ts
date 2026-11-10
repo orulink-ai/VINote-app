@@ -2,7 +2,7 @@
 export type RecordedAudioPolicy = {
   protocol: 1; supported: true; strategy: 'adaptive_pause'; maxSessionAudioBytes: number; policySource: 'service_budget'
 }
-export type RecordedAudioCapabilities = { capabilities?: { recordedAudio?: unknown } }
+export type RecordedAudioCapabilities = { capabilities?: { recordedAudio?: unknown; [key: string]: unknown } }
 export function validAudioBudget(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 640 && value <= 64 * 1024 * 1024 && value % 2 === 0
 }
@@ -14,7 +14,9 @@ export function recordedAudioPolicy(model: RecordedAudioCapabilities | undefined
     ? { protocol: 1, supported: true, strategy: 'adaptive_pause', maxSessionAudioBytes: p.maxSessionAudioBytes, policySource: 'service_budget' } : undefined
 }
 export function recordedAudioUsage(model: RecordedAudioCapabilities | undefined) {
+  if (meetingFilePolicy(model)) return '适用于会议完整录音文件识别；提交后可查看原任务状态。'
   return recordedAudioPolicy(model)
     ? '适用于录音与会议纪要；长录音优先按停顿分段，始终使用所选模型。'
     : '当前服务的录音转写尚未就绪，请更新服务后重试。'
 }
+import { meetingFilePolicy } from './meetingFilePolicy'

@@ -50,6 +50,11 @@ test('phase-only audit is used when module progress is absent', async () => {
   expect(text()).toContain('正在核查纪要 · 已接收 2289 字…')
   expect(text()).not.toContain('正在处理录音'); expect(text()).not.toContain('识别说话人')
 })
+test('compact task does not repeat the summary stage in progress detail', async () => {
+  await act(async () => { view = Renderer.create(<RecordingProcessingStatus record={record} progress={{ owner: 'owner', recordId: record.id, text: '正在生成会议纪要 · 已接收 3803 字…' }} working phase="" noteSaved={false} notesReading={false} compact />) })
+  expect(text().match(/正在生成会议纪要/g)).toHaveLength(1)
+  expect(text()).toContain('已接收 3803 字')
+})
 async function mount(progress?: { text: string; asrProgress?: AsrProgress; transcriptionPercent?: number; speakerPercent?: number; speakerStage?: SpeakerProgress }, value = record) {
   await act(async () => { view = Renderer.create(<RecordingProcessingStatus key={value.id} record={value} progress={progress && { owner: 'owner', recordId: value.id, ...progress }} working={!!progress} phase="" noteSaved={false} notesReading={false} />) })
 }
@@ -70,6 +75,28 @@ test('unstarted recording branches stay waiting and never claim completion', asy
   expect(text().match(/等待开始/g)).toHaveLength(2)
   expect(text()).not.toContain('已完成'); expect(text()).not.toContain('100%')
   expect(view.root.findAllByType(ProcessingProgress)).toHaveLength(0)
+})
+test('whole-file jobs show their actual service stage without inventing a percentage', async () => {
+  await mount({ text: '转写：录音已提交，服务处理中\n说话人：正在分析' })
+  expect(text()).toContain('录音已提交，服务处理中')
+  expect(view.root.findAllByType(ProcessingProgress)[0].props.percent).toBeUndefined()
+})
+test('whole-file upload shows measured transfer progress without claiming recognition is complete', async () => {
+  await mount({ text: '转写：正在上传录音 71%\n说话人：随会议转写一起处理' })
+  const row = view.root.findByType(ProcessingProgress)
+  expect(row.props.label).toBe('上传录音')
+  expect(row.props.percent).toBe(71)
+  expect(text()).toContain('云端处理完成后继续生成纪要')
+  expect(text()).not.toContain('已完成并保存')
+})
+test('saved whole-file result shows provider speaker evidence instead of waiting for local analysis', async () => {
+  await mount(undefined, { ...record, asrModel: 'original-asr', meetingFilePrepared: { wavUri: 'file:///cache/a.wav', checkpoint: { version: 1,
+    job: { id: '4d030132-7222-401c-80c5-c352b0c1e5cf', model: 'original-asr', owner: 'owner', phase: 'result' },
+    binding: { origin: 'https://api.example.com', providerModel: 'bigmodel', originalSha256: 'a'.repeat(64), wavSha256: 'b'.repeat(64), wavBytes: 1000, duration: 20 },
+    result: { text: '完整结果', segments: [{ start: 1, end: 2, text: '你好', speakerId: '1' }] } } } })
+  expect(text()).toContain('整段转写结果已保存')
+  expect(text()).toContain('服务返回 1 个带说话人分组的片段')
+  expect(text()).not.toContain('等待开始')
 })
 test('two independent tasks preserve measured speaker progress and leave unknown ASR indeterminate', async () => {
   await mount({ text: '转写：正在等待服务\n说话人：本机分析 42%', speakerPercent: 42 })
@@ -227,4 +254,15 @@ test('recording without a generation snapshot has no empty processing-details di
   expect(text()).toContain('原文件暂不可用')
   expect(view.root.findAll(node => node.props.accessibilityLabel === '处理详情')).toHaveLength(0)
   expect(text()).not.toContain('两项结果分别保存')
+})
+test('whole-file uploads show the real upload stage without a fabricated percentage', async () => {
+  await mount({ text: '转写：正在上传完整录音，上传完成后自动转写\n说话人：随会议转写一起处理' })
+  expect(text()).toContain('正在上传完整录音，上传完成后自动转写')
+  expect(text()).toContain('转写与说话人识别')
+  expect(view.root.findAllByType(ProcessingProgress)).toHaveLength(0)
+})
+test('an aborted recording request is explained without leaking a raw English error', async () => {
+  await mount(undefined, { ...record, error: 'Aborted' })
+  expect(text()).toContain('连接中断，处理未完成')
+  expect(text()).not.toContain('Aborted')
 })

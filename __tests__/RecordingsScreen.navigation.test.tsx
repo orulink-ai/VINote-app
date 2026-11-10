@@ -6,9 +6,11 @@ import { ScreenHeader } from '../src/components/ScreenHeader'
 import { PrimaryButton } from '../src/components/PrimaryButton'
 import { listRecordings } from '../src/features/recording/recordingLibrary'
 import { listNotes } from '../src/lib/notes'
+import Sound from 'react-native-nitro-sound'
 
 jest.mock('react-native-nitro-sound', () => ({ __esModule: true, default: {
   stopPlayer: jest.fn(async () => {}), removePlayBackListener: jest.fn(), removePlaybackEndListener: jest.fn(),
+  startPlayer: jest.fn(async () => {}), pausePlayer: jest.fn(async () => {}), resumePlayer: jest.fn(async () => {}), seekToPlayer: jest.fn(async () => {}), addPlayBackListener: jest.fn(), addPlaybackEndListener: jest.fn(),
 } }))
 jest.mock('../src/features/recording/recordingLibrary', () => ({ listRecordings: jest.fn() }))
 jest.mock('../src/lib/notes', () => ({ listNotes: jest.fn() }))
@@ -19,6 +21,19 @@ beforeEach(() => { jest.mocked(listRecordings).mockReset().mockResolvedValue([re
 afterEach(async () => { if (view) await act(async () => view.unmount()) })
 const textContains = (value: string) => view.root.findAllByType(Text).some(node => typeof node.props.children === 'string' && node.props.children.includes(value))
 const button = (title: string) => view.root.findAllByType(PrimaryButton).find(node => node.props.title === title)
+
+test('recording player pauses, resumes and seeks without restarting', async () => {
+  await act(async () => { view = Renderer.create(<RecordingsScreen initialFocusId="r1" onBack={jest.fn()} onOpenNote={jest.fn()} />) })
+  const control = (label: string) => view.root.findAll(node => node.props.accessibilityLabel === label && typeof node.props.onPress === 'function')[0]
+  await act(async () => { control('播放原声').props.onPress(); await Promise.resolve() })
+  await act(async () => { control('暂停播放录音').props.onPress(); await Promise.resolve() })
+  await act(async () => { control('播放原声').props.onPress(); await Promise.resolve() })
+  expect(Sound.startPlayer).toHaveBeenCalledTimes(1)
+  expect(Sound.pausePlayer).toHaveBeenCalledTimes(1)
+  expect(Sound.resumePlayer).toHaveBeenCalledTimes(1)
+  await act(async () => { const slider = control('录音播放进度'); slider.props.onAccessibilityAction({ nativeEvent: { actionName: 'increment' } }); await Promise.resolve() })
+  expect(Sound.seekToPlayer).toHaveBeenCalledWith(10000)
+})
 
 test('an external original detail has no global import and returns to its actual source', async () => {
   const back = jest.fn()
@@ -67,8 +82,10 @@ test('a notes outage does not hide retained originals and retry restores their s
   await act(async () => { view = Renderer.create(<RecordingsScreen initialFocusId="r1" onBack={jest.fn()} onOpenNote={jest.fn()} />) })
   expect(textContains('验收录音')).toBe(true)
   expect(textContains('纪要状态暂未读取')).toBe(true)
-  await act(async () => view.root.findAll(node => node.props.accessibilityLabel === '来源与录音操作' && typeof node.props.onPress === 'function')[0].props.onPress())
-  expect(button('播放原声')).toBeDefined()
+  expect(view.root.findAll(node => node.props.accessibilityLabel === '播放原声' && typeof node.props.onPress === 'function').length).toBeGreaterThan(0)
+  expect(button('导出原音频')).toBeUndefined()
+  await act(async () => view.root.findAll(node => node.props.accessibilityLabel === '录音管理' && typeof node.props.onPress === 'function')[0].props.onPress())
+  expect(view.root.findAll(node => node.props.accessibilityLabel === '播放原声' && typeof node.props.onPress === 'function').length).toBeGreaterThan(0)
   expect(button('导出原音频')).toBeDefined()
   await act(async () => button('重新加载录音')!.props.onPress())
   expect(textContains('纪要状态暂未读取')).toBe(false)
@@ -79,8 +96,8 @@ test('a slow notes lookup does not delay original playback or claim no minutes e
   jest.mocked(listNotes).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   await act(async () => { view = Renderer.create(<RecordingsScreen initialFocusId="r1" onBack={jest.fn()} onOpenNote={jest.fn()} />) })
   expect(textContains('验收录音')).toBe(true)
-  await act(async () => view.root.findAll(node => node.props.accessibilityLabel === '来源与录音操作' && typeof node.props.onPress === 'function')[0].props.onPress())
-  expect(button('播放原声')!.props.disabled).toBe(false)
+  await act(async () => view.root.findAll(node => node.props.accessibilityLabel === '录音管理' && typeof node.props.onPress === 'function')[0].props.onPress())
+  expect(view.root.findAll(node => node.props.accessibilityLabel === '播放原声' && typeof node.props.onPress === 'function')[0].props.disabled).toBe(false)
   expect(button('导出原音频')!.props.disabled).toBe(false)
   expect(button('正在核对纪要…')!.props.disabled).toBe(true)
   await act(async () => { finish([]) })

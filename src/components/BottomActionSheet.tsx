@@ -30,6 +30,7 @@ export function BottomActionSheet({
   onClose,
   onBack,
   onShown,
+  compact = false,
   children,
 }: {
   visible: boolean
@@ -37,6 +38,7 @@ export function BottomActionSheet({
   onClose: () => void
   onBack?: () => void
   onShown?: () => void
+  compact?: boolean
   children: React.ReactNode
 }) {
   const reduced = useReducedMotion()
@@ -98,7 +100,7 @@ export function BottomActionSheet({
           <ScrollView
             style={{ flexShrink: 1 }}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[styles.content, compact && { gap: 0, paddingVertical: 12 }]}
           >
             <FooterSlot.Provider value={setFooter}>{children}</FooterSlot.Provider>
           </ScrollView>

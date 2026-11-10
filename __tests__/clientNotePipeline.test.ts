@@ -8,6 +8,10 @@ import { chatCompletion } from '../src/lib/chatCompletion'
 import { loadModels } from '../src/lib/models'
 import { ApiError } from '../src/lib/errors'
 import type { IntakeDraft } from '../src/lib/noteIntake'
+import { prepareMeetingFile } from '../src/lib/prepareMeetingFile'
+import { runPreparedMeetingFile } from '../src/lib/meetingFileAdapter'
+jest.mock('../src/lib/prepareMeetingFile', () => ({ prepareMeetingFile: jest.fn() }))
+jest.mock('../src/lib/meetingFileAdapter', () => ({ runPreparedMeetingFile: jest.fn() }))
 
 jest.mock('../src/config/env', () => ({ API_BASE_URL: 'http://192.168.1.143:9876' }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'alice') }))
@@ -27,11 +31,31 @@ test('a historical video file cannot reserve a new model operation or run infere
 const extracted = { extraction_protocol: 1, title: '文章', text: '完整来源', source_sha256: 'a'.repeat(64), source_type: 'webpage' }
 beforeEach(async () => {
   jest.clearAllMocks()
+  jest.mocked(loadModels).mockReset().mockResolvedValue([{ id: 'same-asr', modelType: 'asr', runtimeStatus: 'available' }, { id: 'same-llm', modelType: 'llm', runtimeStatus: 'available' }])
   const service = require('../src/lib/integration') as { operationId: jest.Mock }
   service.operationId.mockReset().mockReturnValue('11111111-1111-4111-8111-111111111111')
   for (const key of await Storage.getAllKeys()) await Storage.removeItem(key)
   jest.mocked(readAccountId).mockResolvedValue('alice')
   jest.mocked(integrationJson).mockResolvedValue(extracted)
+})
+test('audio notes use the selected whole-file model and preserve its task before inference', async () => {
+  const capabilities = { recordedAudio: { protocol: 1, supported: true, strategy: 'single_request', policySource: 'provider_model' }, useCases: ['meeting'], protocols: ['asr-recording'], audioFormats: ['wav'], audioDelivery: 'public', speakerDiarization: true, utteranceTimestamps: true, maxAudioSeconds: 3600, maxAudioBytes: 100000000 }
+  jest.mocked(loadModels).mockResolvedValue([{ id: 'same-asr', providerModel: 'bigmodel', modelType: 'asr', runtimeStatus: 'available', capabilities }, { id: 'same-llm', modelType: 'llm', runtimeStatus: 'available' }])
+  jest.mocked(FS.stat).mockResolvedValue({ size: 123 } as never)
+  FS.hash = jest.fn().mockResolvedValue('a'.repeat(64))
+  const input: IntakeDraft = { mode: 'file', url: '', sourceType: 'audio', file: { id: 'a1', name: '音频.m4a', extension: 'm4a', size: 123, uri: `file://${FS.DocumentDirectoryPath}/files/accounts/alice/a1.m4a` } as never }
+  const prepared = { wavUri: 'file:///cache/asr-123.wav', checkpoint: { version: 1 as const, job: { id: '11111111-1111-4111-8111-111111111111', owner: 'alice', model: 'same-asr', phase: 'created' as const }, binding: { origin: 'http://192.168.1.143:9876', providerModel: 'bigmodel', originalSha256: 'a'.repeat(64), wavSha256: 'b'.repeat(64), wavBytes: 1000, duration: 10 } } }
+  jest.mocked(prepareMeetingFile).mockResolvedValueOnce(prepared)
+  jest.mocked(runPreparedMeetingFile).mockImplementationOnce(async (_prepared, options) => {
+    const cp = { ...prepared.checkpoint, job: { ...prepared.checkpoint.job, phase: 'result' as const }, result: { text: '完整音频正文', segments: [] } }
+    await options.save(cp); return cp
+  })
+  const receipt = await prepareClientNote('alice', input)
+  await launchClientNote('alice', receipt)
+  const saved = await readClientNote('alice', receipt)
+  expect(saved.result?.markdown).toBe('# 笔记')
+  expect(saved.meetingFilePrepared?.checkpoint.result?.text).toBe('完整音频正文')
+  expect(transcribe).not.toHaveBeenCalled()
 })
 test('new operations freeze LAN origin and never send model IDs to extraction', async () => {
   const receipt = await prepareClientNote('alice', draft)

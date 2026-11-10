@@ -1,6 +1,7 @@
 import { generationBaseUrl } from './integration'
 import { intakeFileName, readIntake, type IntakeDraft } from './noteIntake'
 import { readAccountId, sessionRevision } from './storage'
+import { readClientNote } from './clientNotePipeline'
 
 export type IntakeHistoryTarget = { owner: string; generationOrigin: string; operationId?: string; taskId?: string }
 export type IntakeHistoryRecord = {
@@ -34,7 +35,14 @@ export async function readCurrentIntakeHistory(owner: string): Promise<IntakeHis
   await guard()
   const draft = await readIntake(owner)
   await guard()
-  return intakeHistoryRecord(owner, draft, generationBaseUrl)
+  const history = intakeHistoryRecord(owner, draft, generationBaseUrl)
+  if (history && draft.execution === 'client') {
+    const record = await readClientNote(owner, draft)
+    await guard()
+    const fallback = { pending: '等待处理', running: '正在处理', failed: '处理未完成', unknown: '处理结果待确认', success: '处理已完成' }
+    return { ...history, status: record.message || fallback[record.status] }
+  }
+  return history
 }
 
 export function sameIntakeHistoryTarget(left?: IntakeHistoryTarget, right?: IntakeHistoryTarget) {

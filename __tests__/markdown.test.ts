@@ -1,5 +1,14 @@
-import { markdownPreview } from '../src/lib/markdown'
+import { markdownPreview, omitDuplicateTitle } from '../src/lib/markdown'
 import { noteOrigin } from '../src/lib/noteOrigin'
+test('only hides the first heading when it matches the displayed title', () => {
+  const source = '# **市场会议**\n\n## 结论\n\n- 内容'
+  expect(omitDuplicateTitle(source, '市场会议')).toBe('## 结论\n\n- 内容')
+  expect(omitDuplicateTitle(source, '另一场会议')).toBe(source)
+  expect(omitDuplicateTitle('## 会议\n正文', '会议')).toBe('正文')
+  expect(omitDuplicateTitle('**会议**\n\n正文', '会议')).toBe('正文')
+  expect(omitDuplicateTitle('## 会议安排\n正文', '会议')).toBe('## 会议安排\n正文')
+  expect(omitDuplicateTitle('# 会议\n', '会议')).toBe('# 会议\n')
+})
 test('markdown preview removes formatting but preserves actual hashes and text', () => {
   expect(markdownPreview('# 会议\n\n**决定**：使用 C#\n\n- [文档](https://example.com)')).toBe('会议 决定：使用 C# 文档')
   expect(noteOrigin('mobile')).toBe('App 生成')

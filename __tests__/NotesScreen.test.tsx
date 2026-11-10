@@ -266,7 +266,7 @@ test('meetings empty content has an actionable original-material path without cl
   await act(async () => { view = Renderer.create(<NotesScreen kind="meeting" onOpen={jest.fn()} onOriginals={originals} />) })
   expect(emptyText()).toContain('还没有会议纪要')
   expect(emptyText()).not.toContain('还没有保存的会议')
-  const action = view.root.findAllByType(PrimaryButton).find(node => node.props.title === '查看录音与会议资料')!
+  const action = view.root.findAllByType(PrimaryButton).find(node => node.props.title === '会议原文件')!
   await act(async () => action.props.onPress())
   expect(originals).toHaveBeenCalledTimes(1)
   expect(list().data).toHaveLength(0)
@@ -318,7 +318,6 @@ test.each([1, 7, undefined])('list does not present generated count %s as a comp
   jest.mocked(listNotes).mockResolvedValue([note])
   await renderScreen()
   const row = list().renderItem({ item: list().data[0] })
-  expect(textOf(row)).toContain('当前正文')
   expect(textOf(row)).toContain('第五次保存后的正文')
   expect(textOf(row)).not.toMatch(/版本\s*\d|V\d|已同步|共\s*\d+\s*版/)
   expect(row.props.accessibilityLabel).toContain('当前正文')
@@ -334,7 +333,8 @@ test('current body label preserves the exact detail target and does not refetch 
   const reads = jest.mocked(listNotes).mock.calls.length
   const syncs = jest.mocked(syncWorkspace).mock.calls.length
   const row = list().renderItem({ item: list().data[0] })
-  expect(textOf(row)).toMatch(/会议纪要\s*·\s*当前正文/)
+  expect(textOf(row)).toContain('会议纪要')
+  expect(row.props.accessibilityLabel).toContain('当前正文')
   await act(async () => row.props.onPress())
   expect(onOpen).toHaveBeenCalledWith('workspace-known-key')
   expect(listNotes).toHaveBeenCalledTimes(reads)

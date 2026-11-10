@@ -1,6 +1,11 @@
 import { Platform } from 'react-native'
 import { Buffer } from 'buffer'
 import { recordedAudioPolicy, recordedAudioUsage } from '../src/lib/recordedAudioPolicy'
+test('identifies a supported recording-file meeting model', () => {
+  const model = { runtimeStatus: 'available', capabilities: { recordedAudio: { protocol: 1, supported: true, strategy: 'single_request', policySource: 'provider_model' }, useCases: ['meeting'], protocols: ['asr-recording'], audioFormats: ['wav'], audioDelivery: 'public', speakerDiarization: true, utteranceTimestamps: true, maxAudioSeconds: 3600, maxAudioBytes: 100000000 } }
+  expect(recordedAudioUsage(model)).toContain('录音文件识别')
+  expect(recordedAudioUsage(model)).toContain('完整录音')
+})
 import { planRecordedInterval } from '../src/lib/recordedAudioPlanner'
 import { createPcmReader } from '../src/lib/nativePcmReader'
 jest.mock('../src/lib/nativePcmReader', () => ({ createPcmReader: jest.fn() }))

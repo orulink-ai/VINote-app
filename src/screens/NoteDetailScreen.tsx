@@ -27,6 +27,7 @@ import { devReadTiming as startRead } from '../lib/storage'
 
 import { type FeishuDeliveryReturn } from '../lib/feishuDeliveryReturn'
 import { identityEpoch, subscribeIdentity } from '../lib/sessionIdentity'
+import { displayRecordingTitle } from '../features/recording/recordingTitle'
 
 const devReadTiming: typeof startRead = startRead ?? (() => () => {})
 
@@ -158,7 +159,7 @@ export function NoteDetailScreen({
   }
   return (
     <View style={styles.screen}>
-      <ScreenHeader title={note?.title || '内容详情'} titleLines={2} onBack={onBack} backLabel={`返回${backLabel}`} disabled={deleting} right={note && <Pressable accessibilityRole="button" accessibilityLabel="内容操作" disabled={deleting} onPress={() => { void openActions() }} style={[styles.textButton, { minWidth: 44, flexDirection: 'row', gap: 4 }]}><WorkspaceIcon name="more" /><Text>操作</Text></Pressable>} />
+      <ScreenHeader title={note ? (note.source_type?.startsWith('meeting') ? displayRecordingTitle(note.title) : note.title) || '内容详情' : '内容详情'} titleLines={2} onBack={onBack} backLabel={`返回${backLabel}`} disabled={deleting} right={note && <Pressable accessibilityRole="button" accessibilityLabel="内容操作" disabled={deleting} onPress={() => { void openActions() }} style={[styles.textButton, { minWidth: 44, flexDirection: 'row', gap: 4 }]}><WorkspaceIcon name="more" /><Text>操作</Text></Pressable>} />
       {!loading && note?.bilibili_source && <View style={{ paddingHorizontal: 20 }}><DetailDisclosure title="来源链接与分P"><BilibiliSourceInfo source={note.bilibili_source} /></DetailDisclosure></View>}
       {loading ? (
         <ScrollView contentContainerStyle={styles.content}>
@@ -188,9 +189,7 @@ export function NoteDetailScreen({
           onSettings={onSettings}
           deliveryReturn={deliveryReturn}
           onDeliveryReturnConsumed={onDeliveryReturnConsumed}
-          onDelete={confirmDelete}
           onExport={() => void exportNoteFile(note).catch(cause => setActionError(cause.message))}
-          onShare={() => void shareNoteFile(note).catch(cause => setActionError(cause.message))}
           header={
             <>
               {!!note.project && <Text style={styles.subtitle}>项目 · {note.project}</Text>}
@@ -200,6 +199,7 @@ export function NoteDetailScreen({
         />
       ) : null}
       <BottomActionSheet
+        compact={!renaming && !classifying}
         onBack={renaming || classifying ? () => { if (!renameBusy) { setRenaming(false); setClassifying(false) } } : undefined}
         visible={actionsOpen}
         title={renaming ? '修改名称' : classifying ? '项目与标签' : '内容操作'}
@@ -226,18 +226,19 @@ export function NoteDetailScreen({
           }}
         /> : <>
         <Text style={styles.label}>版本与来源</Text>
-        {note && <PrimaryButton tertiary title="版本与历史" disabled={sharing || deleting} onPress={() => { setActionsOpen(false); setVersionsOpen(true) }} />}
-        {note && !note.source_type?.startsWith('meeting') && onSourceFiles && <PrimaryButton tertiary title="查看来源文件" disabled={sharing || deleting} onPress={() => { setActionsOpen(false); onSourceFiles(note) }} />}
-        {note?.source_type?.startsWith('meeting') && note.task_id && onRecording && <PrimaryButton tertiary title="查看原始录制" disabled={sharing || deleting} onPress={() => { setActionsOpen(false); onRecording(note.task_id!) }} />}
-        {note && (onTools || onContentPlugins) && <View style={{ borderTopWidth: 1, borderColor: colors.line, paddingTop: 14 }}><Text style={styles.label}>内容工具</Text><Text style={styles.subtitle}>核对处理结果后另存版本，保留当前正文。</Text></View>}
-        {note && onTools && <PrimaryButton tertiary title="全文翻译 · MCP 工具" disabled={sharing || deleting} onPress={() => { setActionsOpen(false); onTools(note) }} />}
-        {note && onContentPlugins && <PrimaryButton tertiary title="流程图历史记录" disabled={sharing || deleting} onPress={() => { setActionsOpen(false); onContentPlugins(note) }} />}
+        {note && <PrimaryButton tertiary style={{ justifyContent: 'flex-start', paddingHorizontal: 0 }} title="版本与历史" disabled={sharing || deleting} onPress={() => { setActionsOpen(false); setVersionsOpen(true) }} />}
+        {note && !note.source_type?.startsWith('meeting') && onSourceFiles && <PrimaryButton tertiary style={{ justifyContent: 'flex-start', paddingHorizontal: 0 }} title="查看来源文件" disabled={sharing || deleting} onPress={() => { setActionsOpen(false); onSourceFiles(note) }} />}
+        {note?.source_type?.startsWith('meeting') && note.task_id && onRecording && <PrimaryButton tertiary style={{ justifyContent: 'flex-start', paddingHorizontal: 0 }} title="查看原始录制" disabled={sharing || deleting} onPress={() => { setActionsOpen(false); onRecording(note.task_id!) }} />}
+        {note && (onTools || onContentPlugins) && <View style={{ borderTopWidth: 1, borderColor: colors.line, paddingTop: 10 }}><Text style={styles.label}>内容工具</Text></View>}
+        {note && onTools && <PrimaryButton tertiary style={{ justifyContent: 'flex-start', paddingHorizontal: 0 }} title="全文翻译 · MCP 工具" disabled={sharing || deleting} onPress={() => { setActionsOpen(false); onTools(note) }} />}
+        {note && onContentPlugins && <PrimaryButton tertiary style={{ justifyContent: 'flex-start', paddingHorizontal: 0 }} title="流程图历史记录" disabled={sharing || deleting} onPress={() => { setActionsOpen(false); onContentPlugins(note) }} />}
         <View style={{ borderTopWidth: 1, borderColor: colors.line, paddingTop: 14 }}><Text style={styles.label}>分类与管理</Text></View>
-        <PrimaryButton tertiary title="项目与标签" disabled={sharing || deleting} onPress={() => { setProject(note?.project || ''); setTags(note?.tags?.join('，') || ''); setActionError(''); setClassifying(true) }} />
-        <PrimaryButton tertiary title={note?.archived ? '移出归档' : '归档内容'} disabled={sharing || deleting} onPress={async () => { if (!note) return; setSharing(true); try { setNote(await archiveNote(note.id, !note.archived)); setActionsOpen(false) } catch (cause) { setActionError((cause as Error).message) } finally { setSharing(false) } }} />
+        <PrimaryButton tertiary style={{ justifyContent: 'flex-start', paddingHorizontal: 0 }} title="项目与标签" disabled={sharing || deleting} onPress={() => { setProject(note?.project || ''); setTags(note?.tags?.join('，') || ''); setActionError(''); setClassifying(true) }} />
+        <PrimaryButton tertiary style={{ justifyContent: 'flex-start', paddingHorizontal: 0 }} title={note?.archived ? '移出归档' : '归档内容'} disabled={sharing || deleting} onPress={async () => { if (!note) return; setSharing(true); try { setNote(await archiveNote(note.id, !note.archived)); setActionsOpen(false) } catch (cause) { setActionError((cause as Error).message) } finally { setSharing(false) } }} />
         <AsyncState error={actionError} />
         <PrimaryButton
           tertiary
+          style={{ justifyContent: 'flex-start', paddingHorizontal: 0 }}
           title="修改名称"
           disabled={sharing || deleting}
           onPress={() => {
@@ -247,6 +248,7 @@ export function NoteDetailScreen({
         <View style={{ borderTopWidth: 1, borderColor: colors.line, paddingTop: 14 }}><Text style={styles.label}>导出与分享</Text></View>
         <PrimaryButton
           tertiary
+          style={{ justifyContent: 'flex-start', paddingHorizontal: 0 }}
           title={`分享${contentLabel}文件`}
           loading={sharing}
           disabled={deleting}

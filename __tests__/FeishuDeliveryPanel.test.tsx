@@ -8,6 +8,7 @@ import type { Note } from '../src/types/api'
 
 jest.mock('../src/lib/feishu', () => ({ newSnapshotPublishOptions: jest.requireActual('../src/lib/feishu').newSnapshotPublishOptions, feishuPublishBody: jest.requireActual('../src/lib/feishu').feishuPublishBody, feishuContacts: jest.fn(), contactsValid: (items: any[]) => items.every(item => !!item.name && item.expiresAt > Date.now()), contactRecipients: (items: any[]) => items.map(({ open_id, selection_token }) => ({ open_id, selection_token })), feishuApi: jest.fn(), deliveryStatus: jest.fn(), assertFeishuPublishReady: jest.fn(async () => {}), publishToFeishu: jest.fn(), retryDelivery: jest.fn(), recoverDeliveryDocument: jest.fn() }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
+jest.mock('../src/lib/feishuLocalPreferences', () => ({ readFeishuLocalPreferences: jest.fn(async () => ({ destination_config: { kind: 'personal' }, permission_policy: 'private', notify_self: false, groups: [] })) }))
 afterEach(() => jest.clearAllMocks())
 const note = { id: 'note-1', title: '会议', content: '# 纪要' } as Note
 

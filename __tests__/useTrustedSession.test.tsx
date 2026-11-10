@@ -32,7 +32,7 @@ test('trusted cache becomes readable before identity request settles; no sync ye
   jest.mocked(fetchMe).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   await mount()
   expect(result.readable).toBe(true); expect(result.mode).toBe('checking'); expect(remoteReady()).toBe(false)
-  expect(result.message).toBe('正在连接账号服务…')
+  expect(result.message).toBe('')
   expect(syncWorkspace).not.toHaveBeenCalled()
   await act(async () => { finish({ id: 'A' }) })
   expect(result.mode).toBe('verified'); expect(syncWorkspace).not.toHaveBeenCalled()
@@ -48,7 +48,7 @@ test('eight second deadline aborts actual verifier signal; trusted content stays
   await mount(); await act(async () => { jest.advanceTimersByTime(8000) })
   expect(signal.aborted).toBe(true); expect(result.readable).toBe(true)
   expect(result.mode).toBe('offline-known'); expect(syncWorkspace).not.toHaveBeenCalled()
-  expect(result.message).toBe('暂时无法连接账号服务，已保存内容仍可查看。')
+  expect(result.message).toBe('暂时无法连接网络服务；录音和已保存内容仍可使用，转写及飞书需联网。')
 })
 
 test('no proof plus outage is an explicit unverified screen, never an empty library', async () => {
@@ -67,6 +67,27 @@ test('manual retry only verifies, foreground verifies identity without starting 
   expect(remoteReady()).toBe(false); expect(result.readable).toBe(true)
   await act(async () => foreground('active'))
   expect(fetchMe).toHaveBeenCalledTimes(3); expect(syncWorkspace).not.toHaveBeenCalled()
+})
+test('network recovery rechecks a known local session without user interaction', async () => {
+  jest.useFakeTimers(); await rememberVerifiedCache(identityScope('A'))
+  jest.mocked(fetchMe).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ id: 'A' } as any)
+  await mount()
+  expect(result.mode).toBe('offline-known')
+  await act(async () => { jest.advanceTimersByTime(30000) })
+  expect(result.mode).toBe('verified')
+  expect(result.readable).toBe(true)
+  expect(syncWorkspace).not.toHaveBeenCalled()
+})
+test('offline rechecks pause in the background and resume on return', async () => {
+  jest.useFakeTimers(); await rememberVerifiedCache(identityScope('A'))
+  jest.mocked(fetchMe).mockRejectedValue(new Error('offline'))
+  await mount()
+  await act(async () => foreground('background'))
+  await act(async () => { jest.advanceTimersByTime(90000) })
+  expect(fetchMe).toHaveBeenCalledTimes(1)
+  await act(async () => foreground('active'))
+  expect(fetchMe).toHaveBeenCalledTimes(2)
+  expect(result.readable).toBe(true)
 })
 
 test('401 retains trusted local view and offers re-login without clearing drafts', async () => {

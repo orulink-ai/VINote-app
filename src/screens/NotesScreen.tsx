@@ -18,6 +18,12 @@ import { identityEpoch, subscribeIdentity } from '../lib/sessionIdentity'
 
 /** Parent retains separate view snapshots per category; this contains no note data. */
 export type NotesView = { query: string; filter: string; project: string }
+import { displayRecordingTitle as displayContentTitle } from '../features/recording/recordingTitle'
+const contentPreview = (note: Note) => {
+  const preview = markdownPreview(note.content)
+  const title = displayContentTitle(note.title)
+  return preview.startsWith(title) ? preview.slice(title.length).trimStart() : preview
+}
 
 export function NotesScreen({
   onOpen,
@@ -135,14 +141,15 @@ export function NotesScreen({
   const projects = [...new Set(notes.map(note => note.project).filter((value): value is string => !!value))]
   // Filter each content object first; expanding never reveals archived/project/search exclusions.
   const visible = notes.filter(note => !note.deleted && (kind === 'all' || ((note.source_type || '').startsWith('meeting') ? kind === 'meeting' : kind === 'note'))).filter(note => !project || note.project === project).filter(note => (filter === '归档' ? note.archived : !note.archived) && (filter === '文字' ? ['text', 'file', 'document', 'transcript'].includes(note.source_type || '') : filter === '会议' ? (note.source_type || '').startsWith('meeting') : filter === '音视频' ? ['audio', 'video'].includes(note.source_type || '') : true)).filter(note => !query.trim() || (note.title + markdownPreview(note.content) + (note.tags || []).join(' ')).toLowerCase().includes(query.trim().toLowerCase()))
+  const hasContentInCategory = notes.some(note => !note.deleted && (kind === 'all' || ((note.source_type || '').startsWith('meeting') ? kind === 'meeting' : kind === 'note')))
   const grouped = sourceProof && sourceProof.epoch === identityEpoch() && kind !== 'note'
     ? groupMeetings(visible, sourceProof.owner, sourceProof.sources) : visible
   const rows: MeetingRow[] = grouped.flatMap(row => isMeetingGroup(row) && expanded.has(row.id) ? [row, ...row.notes] : [row])
   const filters = <View style={{ gap: 10, marginBottom: 12 }}><View style={{ gap: 6, paddingVertical: 8 }}>
-    <Field hideLabel label={`搜索${contentLabel}`} value={query} onChangeText={value => updateView({ query: value })} placeholder="搜索标题、正文或标签" style={{ minHeight: 44, paddingVertical: 8, backgroundColor: colors.canvas }} />
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+    <Field search hideLabel label={`搜索${contentLabel}`} value={query} onChangeText={value => updateView({ query: value })} placeholder="搜索笔记" style={{ minHeight: 44, paddingVertical: 8, backgroundColor: colors.card, borderWidth: 0 }} />
+    {(hasContentInCategory || hasFilters) && <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
       {(kind === 'meeting' ? ['全部', '归档'] : ['全部', '文字', '音视频', '归档']).map(label => <Pressable key={label} accessibilityRole="tab" accessibilityState={{ selected: label === filter }} onPress={() => updateView({ filter: label })} style={{ minHeight: 44, minWidth: 44, paddingHorizontal: 14, borderRadius: 14, justifyContent: 'center', backgroundColor: label === filter ? colors.primarySoft : 'transparent' }}><Text style={[styles.subtitle, { color: label === filter ? colors.ink : colors.muted }]}>{label === '文字' ? '文档与文字' : label}</Text></Pressable>)}
-    </View>
+    </View>}
     {!initialProject && projects.length > 0 && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4 }}>
       {['', ...projects].map(value => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: project === value }} onPress={() => updateView({ project: value })} style={{ minHeight: 44, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 14, backgroundColor: project === value ? colors.primarySoft : 'transparent' }}><Text numberOfLines={1} style={styles.subtitle}>{value || '全部项目'}</Text></Pressable>)}
     </ScrollView>}
@@ -153,9 +160,17 @@ export function NotesScreen({
     <View style={styles.screen}>
       <ScreenHeader title={initialProject || (kind === 'meeting' ? '会议' : '笔记')} onBack={onBack} backLabel="返回项目" right={kind === 'meeting' && onRecord ? <PrimaryButton title="录制会议" onPress={onRecord} /> : onNew && kind !== 'meeting' && <PrimaryButton secondary title="写笔记" onPress={onNew} />} />
       {onChangeKind && <View style={{ paddingHorizontal: 16, paddingBottom: 8, flexDirection: 'row', gap: 8 }}>{([{ kind: 'meeting', label: '会议' }, { kind: 'note', label: '笔记' }] as const).map(item => <Pressable key={item.kind} accessibilityRole="tab" accessibilityState={{ selected: kind === item.kind }} accessibilityLabel={item.label} onPress={() => onChangeKind(item.kind)} style={{ minHeight: 44, paddingHorizontal: 20, justifyContent: 'center', borderRadius: 14, backgroundColor: kind === item.kind ? colors.primarySoft : colors.canvas }}><Text style={styles.noteTitle}>{item.label}</Text></Pressable>)}</View>}
-      {kind === 'meeting' && onImport && <View style={{ paddingHorizontal: 16 }}><PrimaryButton secondary title="导入音频" onPress={() => onImport()} /></View>}
-      {kind === 'meeting' && onOriginals && <View style={{ paddingHorizontal: 16, paddingVertical: 8, gap: 4 }}><PrimaryButton secondary title="查看录音与会议资料" onPress={onOriginals} /><Text style={styles.subtitle}>已保存的录音可从这里继续生成纪要；原文件在文件库中管理。</Text></View>}
-      {kind !== 'meeting' && onImport && <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}><ContentIntake onImport={onImport} /></View>}
+      {kind === 'meeting' && <View style={{ paddingHorizontal: 16, paddingVertical: 8, flexDirection: 'row', gap: 8 }}>
+        {onImport && <PrimaryButton style={{ flex: 1 }} secondary title="导入音频" onPress={() => onImport()} />}
+        {onOriginals && <PrimaryButton style={{ flex: 1 }} secondary title="会议原文件" onPress={onOriginals} />}
+      </View>}
+      {kind !== 'meeting' && onImport && <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, gap: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <Text style={styles.eyebrow}>从资料创建</Text>
+          {kind === 'note' && onOriginals && <Pressable accessibilityRole="button" onPress={onOriginals} style={{ minHeight: 44, paddingHorizontal: 4, justifyContent: 'center' }}><Text style={[styles.subtitle, { color: colors.navigationAccent }]}>管理原文件 ›</Text></Pressable>}
+        </View>
+        <ContentIntake onImport={onImport} />
+      </View>}
       <FlatList
         style={{ flex: 1 }}
         contentContainerStyle={{
@@ -182,7 +197,7 @@ export function NotesScreen({
               {!loading && <Text style={styles.subtitle}>
                 {hasFilters
                   ? '试试其他关键词，或清除筛选。'
-                  : kind === 'meeting' ? '保存录音后，生成的纪要才显示在这里。已有录音请从“查看录音与会议资料”继续处理。' : '粘贴网页或视频链接、导入 PDF、Word 或音视频生成总结笔记，也可以直接写笔记。'}
+                  : kind === 'meeting' ? '保存录音后，可在会议中生成纪要。' : '写一篇笔记，或从链接、文件生成。'}
               </Text>}
               {!loading && hasFilters && <PrimaryButton tertiary title="清除筛选" onPress={clearFilters} />}
             </View>
@@ -204,12 +219,12 @@ export function NotesScreen({
             accessibilityLabel={`${item.title.slice(0, 120)}，${(item.source_type || '').startsWith('meeting') ? '会议纪要' : item.source_type === 'text' ? '文字笔记' : '总结笔记'}，当前正文`}
             style={({ pressed }) => [
               styles.listRow,
-              { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 14 },
+              { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 14, borderWidth: 0, paddingHorizontal: 14, paddingVertical: 14 },
               { backgroundColor: pressed ? colors.primarySoft : colors.card },
             ]}
             onPress={() => { if (rowEpoch === identityEpoch()) onOpen(item.id) }}
           >
-            <WorkspaceIcon name={(item.source_type || '').startsWith('meeting') ? 'record' : 'content'} muted />
+            <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-start' }}><WorkspaceIcon name={(item.source_type || '').startsWith('meeting') ? 'record' : 'content'} color={colors.navigationAccent} /></View>
             <View style={{ flex: 1, gap: 6 }}><View
               style={{
                 flexDirection: 'row',
@@ -219,16 +234,16 @@ export function NotesScreen({
               }}
             >
               <Text style={styles.eyebrow}>
-                {(item.source_type || '').startsWith('meeting') ? '会议纪要' : item.source_type === 'text' ? '文字笔记' : '总结笔记'} · 当前正文
+                {(item.source_type || '').startsWith('meeting') ? '会议纪要' : item.source_type === 'text' ? '文字笔记' : '总结笔记'}
               </Text>
               <Text style={[styles.subtitle, { fontSize: 12 }]}>
                 {item.created_at ? new Date(item.created_at).toLocaleDateString('zh-CN') : '来源日期未保存'}
               </Text>
             </View>
-            <Text numberOfLines={2} style={styles.noteTitle}>{item.title}</Text>
+            <Text numberOfLines={2} style={styles.noteTitle}>{displayContentTitle(item.title)}</Text>
             {!!item.source_device && item.source_type !== 'text' && !item.task_id && <Text style={styles.subtitle}>来源设备：{item.source_device}</Text>}
             <Text numberOfLines={2} style={styles.subtitle}>
-              {markdownPreview(item.content)}
+              {contentPreview(item)}
             </Text>
             </View><Text style={{ fontSize: 20, color: colors.muted }}>›</Text>
           </Pressable>

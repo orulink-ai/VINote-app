@@ -2,14 +2,16 @@ import type { ASRDiagnostic } from '../../lib/asrFailure'
 import FS from 'react-native-fs'
 import { exportOriginal } from '../../lib/originalMedia'
 import { NativeModules } from 'react-native'
-import { recordingTitle } from './recordingTitle'
+import { recordingTitle, recordingDisplayName } from './recordingTitle'
 import { readAccountId } from '../../lib/storage'
 import type { TranscriptionCheckpoint, SummaryCheckpoint } from '../../lib/meetingCloud'
 import type { SpeakerCheckpoint } from '../../lib/meetingSpeakers'
 import type { ProcessingTiming } from '../../lib/processingHelpers'
-import { listNotes } from '../../lib/notes'
+import { listNotes, setNoteDeleted } from '../../lib/notes'
+import { executeMeetingDeletion } from './meetingDeleteExecution'
 import { acquireRecordingLock, getGenerationProgress } from './recordingProcessing'
 import { identityEpoch, SessionScopeChangedError } from '../../lib/sessionIdentity'
+import type { MeetingFileCheckpoint } from '../../lib/meetingFileWorkflow'
 
 const metadataTransactions = new Map<string, Promise<unknown>>()
 async function metadataTransaction<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -27,7 +29,7 @@ async function recordingScope() {
   return { owner, directory, guard }
 }
 
-export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; bookmarks?: Array<{ seconds: number; label: string }>; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; lastNoteVersion?: number; error?: string; errorDetails?: { status?: number; code?: string; requestId?: string; asrDiagnostic?: ASRDiagnostic }; processingTimings?: ProcessingTiming[]; transcriptionCheckpoint?: TranscriptionCheckpoint; summaryCheckpoint?: SummaryCheckpoint; speakerCheckpoint?: SpeakerCheckpoint; speakerAliases?: Record<string, string>; generation?: { status: 'pending' | 'paused'; asrModel: string; llmModel: string; startedAt: string; version?: number; summaryOnly?: SummaryOnlyGeneration } }
+export type LocalRecording = { id: string; title: string; uri: string; createdAt: string; duration: number; bookmarks?: Array<{ seconds: number; label: string }>; extension?: string; source?: 'recording' | 'import'; originalName?: string; titleSource?: 'default' | 'manual' | 'ai'; state?: 'recording' | 'saved' | 'interrupted'; transcript?: string; asrModel?: string; llmModel?: string; taskId?: string; noteId?: string; lastNoteVersion?: number; error?: string; errorDetails?: { status?: number; code?: string; requestId?: string; asrDiagnostic?: ASRDiagnostic }; processingTimings?: ProcessingTiming[]; transcriptionCheckpoint?: TranscriptionCheckpoint; meetingFilePrepared?: { wavUri: string; checkpoint: MeetingFileCheckpoint }; previousMeetingFileAttempts?: Array<{ wavUri: string; checkpoint: MeetingFileCheckpoint }>; summaryCheckpoint?: SummaryCheckpoint; speakerCheckpoint?: SpeakerCheckpoint; speakerAliases?: Record<string, string>; generation?: { status: 'pending' | 'paused'; asrModel: string; llmModel: string; startedAt: string; version?: number; summaryOnly?: SummaryOnlyGeneration } }
 export type SummaryOnlyGeneration = { evidenceKey: string }
 export async function accountDirectory() {
   const account = await readAccountId()
@@ -117,32 +119,42 @@ export async function exportRecording(record: LocalRecording) {
   // Keep the recording checks above; the shared exporter owns the OS save result
   // and rechecks owner/epoch. Neither layer reads the whole original into JS.
   const result = await exportOriginal({ id: record.id, uri: record.uri,
-    name: `${record.title.trim() || '会议录音'}.${ext}`, extension: ext, size: Number(file.size),
+    name: `${recordingDisplayName(record).trim() || '会议录音'}.${ext}`, extension: ext, size: Number(file.size),
     mimeType: ({ mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', aac: 'audio/aac', ogg: 'audio/ogg' } as Record<string, string>)[ext] || 'audio/mp4' })
   if (await readAccountId() !== owner || identityEpoch() !== epoch) throw new Error('账号已切换，请核对原保存位置')
   return result
 }
 export async function deleteRecording(record: LocalRecording) {
-  const owner = await readAccountId()
-  if (!owner) throw new Error('请重新登录')
-  const release = acquireRecordingLock(owner, record.id)
-  try {
-    const directory = await accountDirectory()
-    const path = record.uri.replace('file://', '')
-    if (path !== `${directory}/${record.id}.${extension(record)}`) throw new Error('录音路径无效')
-    const current = (await listRecordings()).find(item => item.id === record.id)
-    if (!current || current.uri !== record.uri) throw new Error('录音已变化，请刷新后重试')
-    if (current.generation?.status === 'pending') throw new Error('录音正在生成纪要，请稍后操作')
-    if (await FS.exists(path)) await FS.unlink(path)
-    const metadata = `${directory}/${record.id}.json`
-    if (await FS.exists(metadata)) await FS.unlink(metadata)
-    if (await FS.exists(`${metadata}.tmp`)) await FS.unlink(`${metadata}.tmp`)
-  } finally { release() }
+  const scope = await recordingScope()
+  await executeMeetingDeletion(record.id, {
+    guard: scope.guard,
+    acquire: () => acquireRecordingLock(scope.owner, record.id),
+    loadRecord: async () => {
+      const directory = scope.directory
+      const path = record.uri.replace('file://', '')
+      if (path !== `${directory}/${record.id}.${extension(record)}`) throw new Error('录音路径无效')
+      const current = (await listRecordings()).find(item => item.id === record.id)
+      if (!current || current.uri !== record.uri) throw new Error('录音已变化，请刷新后重试')
+      if (current.generation?.status === 'pending') throw new Error('录音正在生成纪要，请稍后操作')
+      return current
+    },
+    loadNotes: () => listNotes(scope.owner),
+    trashNote: id => setNoteDeleted(id, true, scope.owner),
+    removeOriginal: async current => {
+      const path = current.uri.replace('file://', '')
+      const metadata = `${scope.directory}/${record.id}.json`
+      for (const file of [path, metadata, `${metadata}.tmp`]) {
+        const exists = await FS.exists(file)
+        await scope.guard()
+        if (exists) await FS.unlink(file)
+      }
+    },
+  })
 }
 
 export async function renameRecording(record: LocalRecording, title: string) {
   const cleanTitle = title.trim()
-  if (!cleanTitle || cleanTitle.length > 120) throw new Error('请输入 1–120 字的会议名称')
+  if (!cleanTitle || cleanTitle.length > 120) throw new Error('请输入 1–120 字的录音名称')
   const owner = await readAccountId()
   if (!owner) throw new Error('请重新登录')
   const release = acquireRecordingLock(owner, record.id)
@@ -213,7 +225,7 @@ export async function importRecording(selection?: { uri: string; name: string })
     const createdAt = new Date().toISOString()
     const record: LocalRecording = { id: target.split('/').pop()!.split('.')[0],
       uri: `file://${target}`, extension: ext, source: 'import', originalName: picked.name,
-      title: recordingTitle(createdAt, picked.name.replace(/\.[^.]+$/, '').slice(0, 60)),
+      title: recordingTitle(createdAt, '导入录音'),
       titleSource: 'default', createdAt, duration: 0, state: 'saved' }
     const duration: number = await NativeModules.MeetingAudio.audioInfo(record.uri)
     if (!Number.isFinite(duration) || duration <= 0) throw new Error('音频没有有效时长')

@@ -23,6 +23,7 @@ jest.mock('../src/lib/feishu', () => ({ newSnapshotPublishOptions: jest.requireA
 const note = { id: 'note', title: '最新标题', content: '新正文', workspace_key: 'key', workspace_version_id: 'v3', workspace_revision: 3 } as Note
 beforeEach(async () => {
   for (const key of await Storage.getAllKeys()) await Storage.removeItem(key)
+  await Storage.setItem('vinote:owner:feishu-local-preferences', JSON.stringify({ notify_self: false, groups: [], destination_config: { kind: 'personal' }, permission_policy: 'private' }))
   jest.clearAllMocks()
   jest.mocked(assertFeishuPublishReady).mockResolvedValue(undefined)
   jest.mocked(feishuApi).mockImplementation(async () => ({ configured: true, connected: true, notify_self: true, groups: ['different-group'] }))

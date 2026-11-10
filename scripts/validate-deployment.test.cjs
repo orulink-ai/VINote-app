@@ -23,6 +23,6 @@ test('build channels use the desktop dev VILab origins', () => {
   const testConfig = validateDeployment(require('../config/deployment.test.json'))
   const publicConfig = validateDeployment(require('../config/deployment.public.json'))
   assert.equal(testConfig.apiBaseUrl, 'http://192.168.1.143:9876')
-  assert.equal(publicConfig.apiBaseUrl, 'https://api.orulink.ai')
+  assert.equal(publicConfig.apiBaseUrl, 'https://api-hk.orulink.ai')
   assert.equal(publicConfig.accountProxyHost, '')
 })

@@ -17,11 +17,11 @@ export function ScreenHeader({ title, onBack, backLabel = '返回', right, title
     const animation = Animated.timing(reveal, { toValue: 1, duration: 180, easing: Easing.bezier(0.16, 1, 0.3, 1), useNativeDriver: true })
     animation.start(); return () => animation.stop()
   }, [title, reduced, reveal])
-  return <View style={{ minHeight: 56, paddingHorizontal: onBack ? 12 : 20, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.canvas }}>
+  return <View style={{ minHeight: onBack ? 56 : 68, paddingHorizontal: onBack ? 12 : 20, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.canvas }}>
     {onBack && <Pressable disabled={disabled} accessibilityRole="button" accessibilityLabel={backLabel} onPress={onBack} style={({ pressed }) => ({ minHeight: 44, minWidth: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? colors.primarySoft : 'transparent' })}><View style={{ width: 10, height: 10, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: colors.navigationAccent, transform: [{ rotate: '45deg' }] }} /></Pressable>}
     <Animated.View style={{ flex: 1, gap: 3, opacity: reveal, transform: [{ translateY: reduced ? 0 : reveal.interpolate({ inputRange: [0, 1], outputRange: [5, 0] }) }] }}>
-      <Text numberOfLines={titleLines} style={[styles.noteTitle, { fontSize: onBack ? 17 : 22, lineHeight: onBack ? 24 : 30, fontWeight: '500' }]}>{title}</Text>
+      <Text numberOfLines={titleLines} style={[styles.noteTitle, { fontSize: onBack ? 17 : 28, lineHeight: onBack ? 24 : 36, fontWeight: onBack ? '600' : '700', letterSpacing: onBack ? 0 : -0.5 }]}>{title}</Text>
     </Animated.View>{right}
-    {!onBack && onAccount && <Pressable accessibilityRole="button" accessibilityLabel="账号与设置" onPress={onAccount} style={({ pressed }) => ({ minHeight: 44, minWidth: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? colors.primarySoft : 'transparent' })}><WorkspaceIcon name="account" /></Pressable>}
+    {!onBack && onAccount && <Pressable accessibilityRole="button" accessibilityLabel="账号与设置" onPress={onAccount} style={({ pressed }) => ({ minHeight: 44, borderRadius: 22, paddingHorizontal: 12, flexDirection: 'row', gap: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? colors.primarySoft : colors.card })}><WorkspaceIcon name="account" color={colors.navigationAccent} /><Text style={[styles.subtitle, { color: colors.navigationAccent }]}>我的</Text></Pressable>}
   </View>
 }

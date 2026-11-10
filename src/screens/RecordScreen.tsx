@@ -262,8 +262,8 @@ export function RecordScreen({
             minHeight: 230,
             alignItems: 'center',
             justifyContent: 'center',
-            paddingVertical: 32,
-            gap: 20,
+            paddingVertical: 24,
+            gap: 12,
             borderTopWidth: 1,
             borderBottomWidth: 1,
             borderColor: colors.line,
@@ -337,12 +337,12 @@ export function RecordScreen({
           onPress={recording ? stop : pending ? finish : start}
         />
         {operation === 'preparing' && <PrimaryButton secondary title="取消准备" onPress={cancelPreparation} />}
-        <PrimaryButton
+        {recording && <PrimaryButton
           tertiary
-          title={recording ? '收起录音，返回工作台' : '返回工作台'}
+          title="收起录音，返回工作台"
           disabled={busy || !!pending}
           onPress={onBack}
-        />
+        />}
       </View>
     </View>
   )

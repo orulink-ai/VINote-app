@@ -10,6 +10,10 @@ import { analyzeSpeakers } from '../src/lib/meetingSpeakers'
 import { getGenerationProgress } from '../src/features/recording/recordingProcessing'
 import { acquireGenerationSlot, subscribeGenerationProgress } from '../src/features/recording/recordingProcessing'
 import { NativeModules } from 'react-native'
+import { prepareMeetingFile } from '../src/lib/prepareMeetingFile'
+import { runPreparedMeetingFile } from '../src/lib/meetingFileAdapter'
+jest.mock('../src/lib/prepareMeetingFile', () => ({ prepareMeetingFile: jest.fn() }))
+jest.mock('../src/lib/meetingFileAdapter', () => ({ runPreparedMeetingFile: jest.fn() }))
 jest.mock('../src/features/recording/recordingLibrary', () => ({ saveRecording: jest.fn(async value => value), listRecordings: jest.fn(async () => []) }))
 jest.mock('../src/lib/meetingSpeakers', () => ({ analyzeSpeakers: jest.fn(async (_, options) => { const checkpoint = { version: 1, provider: 'sherpa-onnx-1.12.35', duration: 600, source: { size: 1, modifiedMs: 1 }, turns: [{ start: 0, end: 10, speakerId: 'speaker_1' }] }; await options.save(checkpoint); return checkpoint }), meetingEvidence: jest.fn((text) => text) }))
 jest.mock('../src/lib/meetingCloud', () => ({ transcribe: jest.fn(), summarize: jest.fn() }))
@@ -42,6 +46,24 @@ beforeEach(() => {
   ])
   jest.mocked(nextNoteVersion).mockResolvedValue(1)
   jest.mocked(getNote).mockRejectedValue(new ApiError('本机未找到这份纪要', 404))
+})
+
+test('a supported whole-file meeting model persists its original job and uses the completed result without streaming', async () => {
+  const capabilities = { recordedAudio: { protocol: 1, supported: true, strategy: 'single_request', policySource: 'provider_model' }, useCases: ['meeting'], protocols: ['asr-recording'], audioFormats: ['wav'], audioDelivery: 'public', speakerDiarization: true, utteranceTimestamps: true, maxAudioSeconds: 3600, maxAudioBytes: 100000000 }
+  jest.mocked(loadModels).mockResolvedValueOnce([{ id: 'asr1', providerModel: 'bigmodel', modelType: 'asr', runtimeStatus: 'available', capabilities }, { id: 'llm1', modelType: 'llm', runtimeStatus: 'available' }])
+  const prepared = { wavUri: 'file:///cache/asr-123.wav', checkpoint: { version: 1 as const, job: { id: '4d030132-7222-401c-80c5-c352b0c1e5cf', owner: 'alice', model: 'asr1', phase: 'created' as const }, binding: { origin: 'https://api.example.com', providerModel: 'bigmodel', originalSha256: 'a'.repeat(64), wavSha256: 'b'.repeat(64), wavBytes: 1000, duration: 600 } } }
+  jest.mocked(prepareMeetingFile).mockResolvedValueOnce(prepared)
+  jest.mocked(runPreparedMeetingFile).mockImplementationOnce(async (_prepared, options) => {
+    const checkpoint = { ...prepared.checkpoint, job: { ...prepared.checkpoint.job, phase: 'result' as const }, result: { text: '整段识别结果', segments: [] } }
+    await options.save(checkpoint)
+    return checkpoint
+  })
+  await expect(generateRecording({ id: 'file-record', uri: 'file:///original.m4a', title: '会议', createdAt: '', duration: 600 }, () => {})).resolves.toBe('app-a')
+  expect(prepareMeetingFile).toHaveBeenCalledTimes(1)
+  expect(runPreparedMeetingFile).toHaveBeenCalledTimes(1)
+  expect(transcribe).not.toHaveBeenCalled()
+  expect(analyzeSpeakers).not.toHaveBeenCalled()
+  expect(saveRecording).toHaveBeenCalledWith(expect.objectContaining({ meetingFilePrepared: expect.objectContaining({ checkpoint: expect.objectContaining({ result: expect.objectContaining({ text: '整段识别结果' }) }) }) }))
 })
 
 test('unsubscribing the source view preserves real worker final save and service cleanup', async () => {
@@ -137,7 +159,7 @@ test('a permanent speaker failure pauses the task even if ASR also loses network
   expect(summarize).not.toHaveBeenCalled()
 })
 
-test('AI topic replaces only automatic titles, never manual names', async () => {
+test('generating a summary never changes the recording name', async () => {
   jest.mocked(summarize).mockResolvedValue('# 产品发布安排与职责确认\n内容')
   jest.mocked(createNote).mockResolvedValue({ id: 'app-title' } as never)
   const record = { id: 'title', uri: 'file:///title.m4a', title: '手动标题', createdAt: '2026-09-23T10:00:00Z', duration: 12, transcript: '内容', asrModel: 'asr1' }
@@ -146,6 +168,7 @@ test('AI topic replaces only automatic titles, never manual names', async () => 
   expect(saveRecording).toHaveBeenLastCalledWith(expect.objectContaining({ title: '手动标题' }))
   await generateRecording({ ...record, titleSource: 'default' }, jest.fn())
   expect(createNote).toHaveBeenLastCalledWith(expect.objectContaining({ title: expect.stringContaining('｜产品发布安排与职责确认') }), 'alice', 1)
+  expect(saveRecording).toHaveBeenLastCalledWith(expect.objectContaining({ title: '手动标题', titleSource: 'default' }))
 })
 test('persists transcription before summary and reuses it after failure with selected models', async () => {
   const record = { id: 'a', uri: 'file:///a.m4a', title: '会议', createdAt: '', duration: 12 }

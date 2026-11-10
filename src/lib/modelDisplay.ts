@@ -8,7 +8,7 @@ export function modelDisplay(model: CloudModel | undefined, kind: 'asr' | 'llm',
   const name = safe(model?.name)
   if (name) return name
   const publicModel = safe(model?.providerModel, true)
-  const provider = ({ aliyun: '阿里云', 'volcengine-asr': '豆包', volcengine: '豆包', codex: 'Codex' } as Record<string, string>)[model?.providerId || '']
+  const provider = ({ aliyun: '阿里云', 'volcengine-asr': '豆包', 'volcengine-asr-meeting': '豆包录音文件识别', volcengine: '豆包', codex: 'Codex' } as Record<string, string>)[model?.providerId || '']
   if (publicModel) return provider ? `${provider} · ${publicModel}` : publicModel
   return ordinal === undefined ? kind === 'asr' ? '已选语音模型' : '已选总结模型' : `${kind === 'asr' ? '语音模型' : '总结模型'} ${ordinal}`
 }

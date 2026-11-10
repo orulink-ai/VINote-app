@@ -27,6 +27,7 @@ const text = (view: Renderer.ReactTestRenderer) => JSON.stringify(view.toJSON())
 let view: Renderer.ReactTestRenderer
 beforeEach(async () => {
   for (const key of await Storage.getAllKeys()) await Storage.removeItem(key)
+  await Storage.setItem('vinote:owner:feishu-local-preferences', JSON.stringify({ notify_self: false, groups: ['oc_one'], destination_config: { kind: 'personal' }, permission_policy: 'private' }))
   jest.clearAllMocks()
   jest.mocked(deliveryStatus).mockResolvedValue(null)
   jest.mocked(feishuApi).mockImplementation(async path => {

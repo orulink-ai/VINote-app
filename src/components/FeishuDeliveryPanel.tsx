@@ -26,6 +26,7 @@ import type { Note } from '../types/api'
 import { FeishuDestinationPicker } from './FeishuDestinationPicker'
 import { SettingsCheckbox } from './SettingsCheckbox'
 import { readAccountId } from '../lib/storage'
+import { readFeishuLocalPreferences } from '../lib/feishuLocalPreferences'
 import { newPublishDraft, readPublishDraft, persistPublishDraft, queryPublishReceipt, type PublishDraft } from '../lib/feishuPublishReceipt'
 import { hasPublishReview, reviewPublishOptions, type PublishReview } from '../lib/feishuPublishReview'
 import { deliverySettingsReturn, type FeishuDeliveryReturn } from '../lib/feishuDeliveryReturn'
@@ -164,7 +165,9 @@ export function FeishuDeliveryPanel({
       setContactProtocol(settings.contact_selection_protocol === 1)
       setContactSupported(settings.contact_selection_protocol === 1 && settings.capabilities?.contact_search === true && settings.connected && !settings.expired)
       if (!initialized.current) {
-        setOptions({ destination_config: settings.destination_config || { kind: 'personal' }, permission_policy: settings.permission_policy || 'private', notify_self: settings.notify_self, groups: settings.groups })
+        const localPreferences = await readFeishuLocalPreferences(owner)
+        if (sequence !== requestSequence.current) return
+        setOptions(localPreferences)
         initialized.current = true
       }
       const recovered = pending ? await queryRetryReceipt(pending) : null

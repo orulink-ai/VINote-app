@@ -1,9 +1,11 @@
 import { intakeHistoryRecord, readCurrentIntakeHistory, sameIntakeHistoryTarget } from '../src/lib/intakeHistory'
 import { readIntake } from '../src/lib/noteIntake'
 import { readAccountId, sessionRevision } from '../src/lib/storage'
+import { readClientNote } from '../src/lib/clientNotePipeline'
 
 jest.mock('../src/lib/integration', () => ({ generationBaseUrl: 'https://source.example' }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(), sessionRevision: jest.fn() }))
+jest.mock('../src/lib/clientNotePipeline', () => ({ readClientNote: jest.fn() }))
 jest.mock('../src/lib/noteIntake', () => ({ readIntake: jest.fn(), intakeFileName: jest.fn(file => file.name), recoverIntake: jest.fn(), inspectIntake: jest.fn(), submitIntake: jest.fn(), writeIntake: jest.fn() }))
 const origin = 'https://source.example'
 const pending = { mode: 'url' as const, url: 'https://example.org/doc', operationId: 'original-operation', generationOrigin: origin, uncertain: true, receiptState: 'unknown' as const }
@@ -31,6 +33,13 @@ test('reads only the owner current slot without recovery or mutation', async () 
   expect(readIntake).toHaveBeenCalledWith('owner')
   const module = jest.requireMock('../src/lib/noteIntake')
   for (const name of ['recoverIntake', 'inspectIntake', 'submitIntake', 'writeIntake']) expect(module[name]).not.toHaveBeenCalled()
+})
+test('shows the actual device task stage and message rather than a generic receipt', async () => {
+  const draft = { ...pending, execution: 'client', modelOrigin: 'https://model.example', taskId: 'task' }
+  ;(readIntake as jest.Mock).mockResolvedValue(draft)
+  ;(readClientNote as jest.Mock).mockResolvedValue({ status: 'running', stage: 'asr', message: '转写中 42%' })
+  expect(await readCurrentIntakeHistory('owner')).toMatchObject({ status: '转写中 42%' })
+  expect(readClientNote).toHaveBeenCalledWith('owner', draft)
 })
 test('rejects owner switch before reading and late switch after reading', async () => {
   ;(readAccountId as jest.Mock).mockResolvedValueOnce('other')

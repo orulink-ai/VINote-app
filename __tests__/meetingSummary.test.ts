@@ -9,6 +9,17 @@ const options = () => ({ guard: jest.fn(async () => {}), progress: jest.fn(), sa
 
 beforeEach(() => jest.mocked(chatCompletion).mockReset())
 
+test('new summaries preserve explicit speaker evidence and use readable Markdown without inventing identities', async () => {
+  jest.mocked(chatCompletion).mockResolvedValue(answer('# 讨论\n\n## 方案\n- 说话人 1 提出方案') as never)
+  await summarize('【带时间的识别片段】\n0–2 秒 · 说话人 1：提出方案', '会议', 'llm', options())
+  for (const [, messages] of jest.mocked(chatCompletion).mock.calls) {
+    expect(messages[0].content).toContain('明确带说话人标签的识别片段')
+    expect(messages[0].content).toContain('不能猜测身份')
+    expect(messages[0].content).toContain('二级标题')
+    expect(messages[0].content).toContain('默认不输出时间线')
+  }
+})
+
 test.each([0, 1])('old v10 facts:%i cannot replace the full source or mutate its checkpoint', async savedIndex => {
   const source = 'synthetic evidence '.repeat(500)
   const checkpoint: SummaryCheckpoint = { version: 10, source, model: 'frozen-llm', title: 'synthetic meeting',
@@ -21,7 +32,7 @@ test.each([0, 1])('old v10 facts:%i cannot replace the full source or mutate its
     expect(messages[1].content).toContain(source)
     expect(messages[1].content).not.toContain('retained old facts')
   }
-  expect(state.save).toHaveBeenLastCalledWith(expect.objectContaining({ version: 11,
+  expect(state.save).toHaveBeenLastCalledWith(expect.objectContaining({ version: 13,
     parts: { draft: 'synthetic complete answer', audit: 'synthetic complete answer' } }))
   expect(JSON.stringify(checkpoint)).toBe(before)
 })
@@ -37,7 +48,7 @@ test('short transcript drafts directly and audits against the original evidence'
   expect(request(0).messages[0].content).toContain('没有就完全省略')
   expect(request(0).messages[0].content).toContain('不设字数目标')
   expect(state.save).toHaveBeenCalledTimes(2)
-  expect(state.save).toHaveBeenLastCalledWith(expect.objectContaining({ version: 11, parts: { draft: '# 初稿', audit: '# 修订纪要' } }))
+  expect(state.save).toHaveBeenLastCalledWith(expect.objectContaining({ version: 13, parts: { draft: '# 初稿', audit: '# 修订纪要' } }))
 })
 
 test('version 10 prompt checkpoint is invalidated while version 11 resumes a saved full draft', async () => {
@@ -111,7 +122,7 @@ test('account change after a model reply prevents checkpoint writes and the audi
   expect(state.save).not.toHaveBeenCalled()
 })
 
-test('large full-source completed v11 summary reuses saved draft and audit without requests', async () => {
+test('large full-source completed summary reuses saved draft and audit without requests', async () => {
   jest.mocked(chatCompletion).mockImplementation(async (_model, messages) =>
     answer(messages[0].content.includes('核查初稿') ? '# 最终纪要' : '# 初稿') as never)
   const source = '[录音第 0 分钟起]\n' + '讨论事实、条件及不同意见。'.repeat(1600)
@@ -120,7 +131,7 @@ test('large full-source completed v11 summary reuses saved draft and audit witho
   expect(chatCompletion).toHaveBeenCalledTimes(2)
   expect(request(1).messages[1].content).toContain(source)
   const saved = state.save.mock.calls.at(-1)![0]
-  expect(saved.version).toBe(11)
+  expect(saved.version).toBe(13)
   expect(Object.keys(saved.parts).sort()).toEqual(['audit', 'draft'])
   jest.mocked(chatCompletion).mockClear()
   expect(await summarize(source, '会议', 'llm', { ...options(), checkpoint: saved })).toBe('# 最终纪要')
@@ -140,4 +151,14 @@ test('meeting content chooses its structure without a word target or a mandatory
   expect(audit).toContain('保留适合内容的组织方式')
   expect(audit).not.toContain('其余以删减和压缩为主')
   expect(chatCompletion).toHaveBeenCalledTimes(2)
+})
+
+test('new summaries request readable points while an existing v12 draft resumes its original rules', async () => {
+  jest.mocked(chatCompletion).mockResolvedValue(answer('# 纪要') as never)
+  const source = '会议讨论内容'
+  await summarize(source, '会议', 'llm', options())
+  expect(request(0).messages[0].content).toContain('每个要点聚焦一件事')
+  jest.mocked(chatCompletion).mockClear()
+  await summarize(source, '会议', 'llm', { ...options(), checkpoint: { version: 12, model: 'llm', title: '会议', source, parts: { draft: '# 初稿' } } })
+  expect(request(0).messages[0].content).not.toContain('每个要点聚焦一件事')
 })

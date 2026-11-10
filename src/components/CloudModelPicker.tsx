@@ -1,6 +1,7 @@
 import { recordedAudioUsage } from '../lib/recordedAudioPolicy'
 import { modelEligible, modelEligibility } from '../lib/modelEligibility'
 import { modelDisplay } from '../lib/modelDisplay'
+import { isMeetingFileModel } from '../lib/meetingFilePolicy'
 import { Text } from './AppText'
 import React, { useCallback, useEffect, useState } from 'react'
 import { Pressable, View } from 'react-native'
@@ -21,7 +22,7 @@ export function CloudModelPicker({ disabled, onReady }: { disabled: boolean; onR
     try {
       const [list, selected] = await Promise.all([loadModels(forceRefresh), loadSelection()])
       setModels(list); setAsr(selected.asr_model); setLlm(selected.llm_model)
-      const valid = (['asr', 'llm'] as const).every(kind => list.some(m => m.id === (kind === 'asr' ? selected.asr_model : selected.llm_model) && m.modelType === kind && modelEligible(m)))
+      const valid = (['asr', 'llm'] as const).every(kind => list.some(m => m.id === (kind === 'asr' ? selected.asr_model : selected.llm_model) && m.modelType === kind && modelEligible(m) && (kind !== 'asr' || isMeetingFileModel(m))))
       onReady(valid); setEditing(!valid)
     } catch (e) { setError(e instanceof Error ? e.message : '无法加载模型') }
     finally { setBusy(false) }
@@ -39,19 +40,19 @@ export function CloudModelPicker({ disabled, onReady }: { disabled: boolean; onR
     <Text style={styles.subtitle}>选择语音转写与纪要模型，保存后用于本次会议。</Text>
     {(['asr', 'llm'] as const).map(kind => <View key={kind} style={{ gap: 8 }}>
       <Text style={styles.label}>{kind === 'asr' ? '语音转写' : '会议纪要'}</Text>
-      {(kind === 'asr' ? asr : llm) && !models.some(m => m.modelType === kind && m.id === (kind === 'asr' ? asr : llm)) && <Text style={styles.subtitle}>原选择：{modelName(kind === 'asr' ? asr : llm, kind)} · 暂不可用，已保留</Text>}{models.filter(m => m.modelType === kind).map((m, index) => {
+      {(kind === 'asr' ? asr : llm) && !models.some(m => m.modelType === kind && m.id === (kind === 'asr' ? asr : llm) && (kind !== 'asr' || isMeetingFileModel(m))) && <Text style={styles.subtitle}>原选择：{modelName(kind === 'asr' ? asr : llm, kind)} · 请重新选择录音文件模型</Text>}{models.filter(m => m.modelType === kind && (kind !== 'asr' || isMeetingFileModel(m))).map((m, index) => {
         const selected = (kind === 'asr' ? asr : llm) === m.id
         const unavailable = !modelEligible(m)
         return <Pressable key={m.id} accessibilityRole="radio" accessibilityState={{ checked: selected, disabled: unavailable || disabled || busy }}
           disabled={disabled || busy || unavailable} onPress={() => { kind === 'asr' ? setAsr(m.id) : setLlm(m.id); onReady(false) }}
           style={{ minHeight: 48, paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: 1, borderColor: colors.line, backgroundColor: selected ? colors.primarySoft : colors.card, opacity: unavailable ? 0.45 : 1 }}>
-          <Text style={styles.label}>{selected ? '●  ' : '○  '}{modelName(m.id, kind, index + 1)}</Text>{kind === 'asr' && <Text style={styles.subtitle}>{recordedAudioUsage(m)}</Text>}{unavailable && <Text style={styles.subtitle}>当前不可用，原选择保留</Text>}{modelEligibility(m) === 'retryable' && <Text style={styles.subtitle}>服务上次检查暂不可用，可尝试选择</Text>}
+          <Text style={styles.label}>{selected ? '●  ' : '○  '}{modelName(m.id, kind, index + 1)}</Text>{kind === 'asr' && <Text style={styles.subtitle}>{recordedAudioUsage(m)}</Text>}{unavailable && <Text style={styles.subtitle}>{selected ? '当前不可用，原选择保留' : '当前不可用'}</Text>}{modelEligibility(m) === 'retryable' && <Text style={styles.subtitle}>服务上次检查暂不可用，可尝试选择</Text>}
         </Pressable>
       })}
-      {!busy && !error && !models.some(m => m.modelType === kind) && <Text style={styles.subtitle}>暂无部署模型</Text>}
+      {!busy && !error && !models.some(m => m.modelType === kind && (kind !== 'asr' || isMeetingFileModel(m))) && <Text style={styles.subtitle}>{kind === 'asr' ? '暂无可用的录音文件识别模型，请联系管理员。' : '暂无部署模型'}</Text>}
     </View>)}
     {!!error && <Text accessibilityRole="alert" style={{ color: colors.danger }}>{error}</Text>}
-    <PrimaryButton title="确认模型" disabled={disabled || busy || !asr || !llm} loading={busy} onPress={save} />
+    <PrimaryButton title="确认模型" disabled={disabled || busy || !asr || !llm || !models.some(m => m.id === asr && m.modelType === 'asr' && isMeetingFileModel(m) && modelEligible(m))} loading={busy} onPress={save} />
     <PrimaryButton title="刷新模型列表" secondary disabled={disabled || busy} onPress={() => load(true)} />
   </View>
 }

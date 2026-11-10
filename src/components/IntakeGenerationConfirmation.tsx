@@ -5,6 +5,7 @@ import { PrimaryButton } from './PrimaryButton'
 import { loadModels, loadSelection, type CloudModel, type ModelSelection } from '../lib/models'
 import { modelEligible } from '../lib/modelEligibility'
 import { modelDisplay } from '../lib/modelDisplay'
+import { isMeetingFileModel } from '../lib/meetingFilePolicy'
 import { identityEpoch, subscribeIdentity } from '../lib/sessionIdentity'
 import { readAccountId } from '../lib/storage'
 import { colors, styles } from '../design-system/theme'
@@ -19,7 +20,7 @@ export function IntakeGenerationConfirmation({ owner, media, disabled, onConfirm
   const [submitting, setSubmitting] = useState(false)
   const epoch = useRef(identityEpoch()), confirmed = useRef(false), sequence = useRef(0), mounted = useRef(true)
   const kinds: ('asr' | 'llm')[] = media ? ['asr', 'llm'] : ['llm']
-  const eligible = kinds.every(kind => models.some(m => m.modelType === kind && m.id === selection[`${kind}_model`] && modelEligible(m)))
+  const eligible = kinds.every(kind => models.some(m => m.modelType === kind && m.id === selection[`${kind}_model`] && modelEligible(m) && (kind !== 'asr' || isMeetingFileModel(m))))
   const load = useCallback(async () => {
     const run = ++sequence.current, identity = identityEpoch()
     epoch.current = identity; confirmed.current = false
@@ -56,12 +57,14 @@ export function IntakeGenerationConfirmation({ owner, media, disabled, onConfirm
     <Text style={styles.subtitle}>{loading ? '正在核对本次处理模型…' : media ? '本次使用以下模型转写音视频并整理笔记，原文件保留。' : '本次使用以下模型整理完整来源，不调用语音转写。'}</Text>
     {kinds.map(kind => <View key={kind} style={{ gap: 6 }}>
       <Text style={styles.label}>{kind === 'asr' ? '语音转写' : '内容总结'}</Text>
-      {models.filter(m => m.modelType === kind).map((m, index) => <Pressable key={m.id} accessibilityRole="radio"
+      {models.filter(m => m.modelType === kind && (kind !== 'asr' || isMeetingFileModel(m))).map((m, index) => <Pressable key={m.id} accessibilityRole="radio"
         accessibilityState={{ checked: selection[`${kind}_model`] === m.id, disabled: disabled || submitting || !modelEligible(m) }}
         disabled={disabled || submitting || !modelEligible(m)} onPress={() => setSelection(previous => ({ ...previous, [`${kind}_model`]: m.id }))}
         style={{ minHeight: 48, justifyContent: 'center', padding: 12, backgroundColor: selection[`${kind}_model`] === m.id ? colors.primarySoft : colors.card }}>
         <Text style={styles.label}>{selection[`${kind}_model`] === m.id ? '● ' : '○ '}{modelDisplay(m, kind, index + 1)}{!modelEligible(m) ? ' · 当前不可用' : ''}</Text>
       </Pressable>)}
+      {!loading && kind === 'asr' && !models.some(m => m.modelType === 'asr' && isMeetingFileModel(m)) && <Text style={styles.subtitle}>当前服务没有可用的录音文件识别模型，请联系管理员。</Text>}
+      {!loading && kind === 'asr' && !!selection.asr_model && !models.some(m => m.id === selection.asr_model && m.modelType === 'asr' && isMeetingFileModel(m)) && <Text style={styles.subtitle}>原选择不适用于录音文件，请选择上方模型。</Text>}
     </View>)}
     {!!error && <Text accessibilityRole="alert" style={{ color: colors.danger }}>{error}</Text>}
     <Text style={styles.subtitle}>仅用于本次处理，不改变默认模型。确认后请求所选服务；未确认结果不会自动重发。</Text>

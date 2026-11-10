@@ -12,6 +12,10 @@ import { transcribe, type TranscriptionCheckpoint } from './meetingCloud'
 import { chatCompletion } from './chatCompletion'
 import { ApiError, ModelRequestNotSent } from './errors'
 import type { IntakeDraft } from './noteIntake'
+import { meetingFilePolicy } from './meetingFilePolicy'
+import { prepareMeetingFile } from './prepareMeetingFile'
+import { runPreparedMeetingFile } from './meetingFileAdapter'
+import type { MeetingFileCheckpoint } from './meetingFileWorkflow'
 
 export type Extraction = { extraction_protocol: 1; title: string; text: string; source_sha256: string; source_type: string }
 type Fingerprint = { uri?: string; sha256?: string; size?: number; url?: string }
@@ -21,6 +25,7 @@ export type ClientNote = {
   status: 'pending' | 'running' | 'failed' | 'unknown' | 'success'; message: string
   stage: 'extract' | 'asr' | 'llm' | 'save'; inFlight?: 'asr' | 'llm'
   transcription?: TranscriptionCheckpoint; text?: string; title?: string; extractedHash?: string
+  meetingFilePrepared?: { wavUri: string; checkpoint: MeetingFileCheckpoint }
   result?: { title: string; markdown: string }; retryable?: boolean
 }
 export function canonicalSourceUrl(value: string) {
@@ -30,6 +35,7 @@ export function canonicalSourceUrl(value: string) {
   return parsed.href.replace(/#.*$/, '')
 }
 const origin = () => API_BASE_URL.replace(/\/+$/, '')
+const isLegacyOrigin = (value: string) => origin() === 'https://api-hk.orulink.ai' && value === 'https://api.orulink.ai'
 const key = (owner: string, id: string) => `vinote:${owner}:client-note:${id}`
 const active = new Map<string, { record: ClientNote; promise: Promise<void> }>()
 const idPattern = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i
@@ -43,7 +49,7 @@ async function persist(record: ClientNote) {
 }
 function validate(record: ClientNote, owner: string, draft: IntakeDraft): ClientNote {
   if (!record || record.protocol !== 1 || record.owner !== owner || record.operationId !== draft.operationId ||
-      record.taskId !== draft.taskId || !idPattern.test(record.operationId) || record.modelOrigin !== origin() ||
+      record.taskId !== draft.taskId || !idPattern.test(record.operationId) || (record.modelOrigin !== origin() && !isLegacyOrigin(record.modelOrigin)) ||
       !record.models?.llm_model || !record.source || !record.draft ||
       record.draft.operationId !== record.operationId || record.draft.taskId !== record.taskId ||
       !['pending', 'running', 'failed', 'unknown', 'success'].includes(record.status) ||
@@ -64,6 +70,12 @@ export async function readClientNote(owner: string, draft: IntakeDraft): Promise
   if (!raw) throw new Error('原设备处理记录不存在，未查询云端或重新提交')
   const live = active.get(key(owner, draft.operationId || ''))
   const record = validate(live?.record || JSON.parse(raw), owner, draft)
+  // Preserve readable historical results, but never replay an old-origin
+  // model request through the new service without an explicit migration.
+  if (!live && isLegacyOrigin(record.modelOrigin) && !record.result) {
+    return { ...record, status: record.inFlight ? 'unknown' : 'failed', retryable: false,
+      message: '这是旧服务的处理记录，原资料已保留；请查看原任务状态，未重新提交' }
+  }
   // Status reads never restart work. A process death cannot erase an attempt marker.
   if (!live && !record.result && ['pending', 'running'].includes(record.status)) {
     return { ...record, status: record.inFlight ? 'unknown' : 'failed', retryable: !record.inFlight,
@@ -110,7 +122,7 @@ export async function prepareClientNote(owner: string, draft: IntakeDraft, confi
     if (previous.owner !== owner || previous.protocol !== 1 || !previous.source) throw new Error('历史处理记录无法核验，未提交生成')
     const sameUrl = source.url && previous.source.url && canonicalSourceUrl(previous.source.url) === source.url
     const sameContent = source.sha256 && previous.source.sha256 === source.sha256 && previous.source.size === source.size
-    if ((sameUrl || sameContent || JSON.stringify(previous.source) === JSON.stringify(source)) && (previous.inFlight || previous.transcription?.version === 5 && previous.transcription.inFlight || previous.status === 'unknown')) throw new Error('此来源有未确认的模型请求，不能另建操作重复发送')
+    if ((sameUrl || sameContent || JSON.stringify(previous.source) === JSON.stringify(source)) && (previous.inFlight || previous.transcription?.version === 5 && previous.transcription.inFlight || ['submitted', 'unknown'].includes(previous.meetingFilePrepared?.checkpoint.job.phase || '') || previous.status === 'unknown')) throw new Error('此来源有未确认的模型请求，不能另建操作重复发送')
     if (JSON.stringify(previous.source) === JSON.stringify(source) && previous.status === 'pending') {
       if (confirmedModels && JSON.stringify(previous.models) !== JSON.stringify(models)) throw new Error('原准备操作模型不同，请核验原操作；未替换已保存模型')
       await ownerGuard(owner)
@@ -137,7 +149,7 @@ export async function recoverPreparedClientNote(owner: string, draft: IntakeDraf
   if (!raw || active.has(key(owner, operationId))) throw new Error('原来源已有处理关联，无法证明尚未派发，未重新提交')
   const record = JSON.parse(raw) as ClientNote
   validate(record, owner, record.draft)
-  if (record.operationId !== operationId || record.status !== 'pending' || record.inFlight || record.text || record.result || record.transcription || record.extractedHash || record.draft.mode !== 'file') throw new Error('原操作无法证明尚未派发，请保留原记录核验')
+  if (record.operationId !== operationId || record.status !== 'pending' || record.inFlight || record.text || record.result || record.transcription || record.meetingFilePrepared || record.extractedHash || record.draft.mode !== 'file') throw new Error('原操作无法证明尚未派发，请保留原记录核验')
   const source = await fileIdentity(owner, draft)
   if (JSON.stringify(source) !== JSON.stringify(record.source)) throw new Error('原来源身份已变化，未重新提交')
   await ownerGuard(owner)
@@ -183,7 +195,32 @@ async function execute(record: ClientNote) {
     if (!record.text) {
       if (media) {
         record.stage = 'asr'; record.message = '正在转写来源音频'; await persist(record)
-        const text = await transcribe(record.source.uri!, record.models.asr_model, {
+        const catalog = await loadModels(true)
+        await guard()
+        const asrModel = catalog.find(item => item.modelType === 'asr' && item.id === record.models.asr_model)
+        const policy = meetingFilePolicy(asrModel)
+        if (record.transcription && record.meetingFilePrepared) throw new Error('来源存在不同的转写进度，请先核对原任务')
+        let text: string
+        if (record.meetingFilePrepared || (policy && !record.transcription)) {
+          const providerModel = asrModel?.providerModel
+          if (!providerModel) throw new Error('录音识别模型信息不完整，请刷新后重试')
+          let prepared = record.meetingFilePrepared
+          if (!prepared) {
+            if (!policy) throw new Error('录音识别模型暂不可用，请稍后重试')
+            prepared = await prepareMeetingFile({ uri: record.source.uri!, origin: record.modelOrigin, owner: record.owner,
+              model: record.models.asr_model, providerModel, id: record.operationId, policy, guard })
+            record.meetingFilePrepared = prepared; await persist(record); await guard()
+          }
+          const saved = prepared
+          const checkpoint = await runPreparedMeetingFile(saved, {
+            owner: record.owner, model: record.models.asr_model, providerModel, origin: record.modelOrigin, sourceUri: record.source.uri!, guard,
+            save: async next => { await guard(); record.meetingFilePrepared = { ...saved, checkpoint: next }; await persist(record) },
+            wait: () => new Promise(resolve => setTimeout(resolve, 3000)),
+            progress: phase => { record.message = phase === 'submitted' ? '录音已提交，服务处理中' : '转写结果已保存' },
+          })
+          if (!checkpoint.result) throw new Error(checkpoint.job.phase === 'unknown' ? '录音识别结果尚未确认，请核对原任务' : '录音识别未完成，原任务已保留')
+          text = checkpoint.result.text
+        } else text = await transcribe(record.source.uri!, record.models.asr_model, {
           owner: record.owner, checkpoint: record.transcription, guard,
           progress: message => { record.message = message },
           save: async checkpoint => {

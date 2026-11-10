@@ -27,7 +27,7 @@ let status: any, view: Renderer.ReactTestRenderer | undefined
 const button = (title: string) => view!.root.findAllByType(PrimaryButton).find(node => node.props.title === title)!
 const text = () => JSON.stringify(view!.toJSON())
 const expand = async (title: string) => { await act(async () => view!.root.findAll(node => node.props.accessibilityLabel === title && typeof node.props.onPress === 'function')[0].props.onPress()) }
-async function mount(sheet = false) { await act(async () => { view = Renderer.create(sheet ? <BottomActionSheet visible title="发布" onClose={() => {}}><FeishuDeliveryPanel note={note} /></BottomActionSheet> : <FeishuDeliveryPanel note={note} />) }) }
+async function mount(sheet = false) { await Storage.setItem('vinote:owner:feishu-local-preferences', JSON.stringify({ notify_self: status.notify_self, groups: status.groups, destination_config: status.destination_config || { kind: 'personal' }, permission_policy: status.permission_policy || 'private' })); await act(async () => { view = Renderer.create(sheet ? <BottomActionSheet visible title="发布" onClose={() => {}}><FeishuDeliveryPanel note={note} /></BottomActionSheet> : <FeishuDeliveryPanel note={note} />) }) }
 async function enabled() { await Storage.setItem(connectorPluginKey('owner'), JSON.stringify({ version: 1, feishu: { installed: true, enabled: true } })) }
 beforeEach(async () => {
   jest.clearAllMocks(); jest.mocked(readAccountId).mockResolvedValue('owner'); transitionIdentity('owner')

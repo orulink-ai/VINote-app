@@ -372,9 +372,9 @@ export function NoteIntakeScreen({ onBack, onSaved, initialMode = 'url', initial
   return <View style={styles.screen}>
     <ScreenHeader title="链接或文件转笔记" onBack={leave} backLabel={backLabel} disabled={busy} />
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, gap: 20 }}>
-      {!draft.taskId && <Text style={styles.subtitle}>选择来源，生成可编辑的笔记。原文件保留在文件库。</Text>}
+      {!draft.taskId && <Text style={styles.subtitle}>选择链接或文件，生成可编辑的笔记。导入的文件保存在此设备。</Text>}
       {ready && <View style={{ gap: 8 }}>
-        <AsyncState loading={serviceState === 'checking'} loadingLabel="正在检查服务…" error={serviceError} onRetry={() => setServiceAttempt(value => value + 1)} retryLabel="重新检查服务" />
+        <AsyncState loading={serviceState === 'checking'} loadingLabel="正在检查内容服务…" error={serviceError && draft.mode === 'file' && !draft.file ? `文档服务：${serviceError} 仍可选择音频文件，音频使用所选转写服务。` : serviceError} onRetry={() => setServiceAttempt(value => value + 1)} retryLabel="重新检查服务" />
         {serviceState === 'ready' && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>{draft.mode === 'file' && draft.file && ['audio', 'video'].includes(intakeSourceType(draft.file)) ? '媒体由设备连接所选模型处理' : '内容服务已就绪'}</Text>}
       </View>}
       {awaitingLibraryChoice && <View style={styles.card}><Text style={styles.noteTitle}>所选文件：{initialFile!.name}</Text><Text style={styles.subtitle}>另有一份来源已保留：{draft.file ? intakeFileName(draft.file) : draft.url || '原提交'}。请选择要继续的内容，尚未提交所选文件。</Text><PrimaryButton title="使用文件库中的文件" disabled={busy || !ready} onPress={useLibraryFile} /><PrimaryButton secondary title="继续原来源" disabled={busy || !ready} onPress={() => setContinueExisting(true)} /></View>}

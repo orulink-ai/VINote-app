@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Alert, Linking, TextInput, View } from 'react-native'
+import { Alert, Linking, Pressable, TextInput, View } from 'react-native'
 import { Text } from './AppText'
 import { PrimaryButton } from './PrimaryButton'
 import { feishuApi } from '../lib/feishu'
@@ -18,7 +18,7 @@ export function FeishuApplicationSetup({ onChanged }: { onChanged: () => void })
     try { setApp(await feishuApi<Application>('/application', { method: 'PUT', body: JSON.stringify({ app_id: app.app_id, app_secret: secret, tenant_key: app.tenant_key, document_domain: app.document_domain }) })); setSecret(''); setEditing(false); onChanged() }
     catch (cause) { setError((cause as Error).message) } finally { setBusy(false) }
   }
-  if (!advanced) return <View style={[styles.card, { gap: 8 }]}><Text style={styles.noteTitle}>应用管理</Text><Text style={styles.subtitle}>配置、更换或清理应用凭证；日常使用无需调整。</Text><PrimaryButton tertiary title="管理应用" onPress={() => setAdvanced(true)} /></View>
+  if (!advanced) return <Pressable accessibilityRole="button" accessibilityLabel="应用管理" onPress={() => setAdvanced(true)} style={({ pressed }) => ({ minHeight: 56, paddingHorizontal: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: pressed ? colors.primarySoft : colors.card })}><View style={{ flex: 1, gap: 3 }}><Text style={styles.noteTitle}>应用管理</Text><Text style={styles.subtitle}>配置飞书企业应用</Text></View><Text style={[styles.subtitle, { fontSize: 20 }]}>›</Text></Pressable>
   return <View style={[styles.card, { gap: 12 }]}><PrimaryButton tertiary title="收起应用管理" onPress={() => setAdvanced(false)} /><Text style={styles.noteTitle}>选择接入方式</Text><Text style={styles.subtitle}>公司已接入可直接授权；也可以配置自己的企业应用，再授权飞书账号。新应用需在飞书审核发布。</Text>
     {!!error && <><Text accessibilityRole="alert" style={{ color: colors.danger }}>{error}</Text><PrimaryButton secondary title="重新读取配置" disabled={busy} onPress={() => void load()} /></>}
     <PrimaryButton secondary title={editing ? '收起应用配置' : app?.custom ? '更换应用凭证' : '选择已有企业应用'} disabled={busy || !app} onPress={() => setEditing(!editing)} />

@@ -45,6 +45,20 @@ beforeEach(() => {
 })
 const confirm = async () => ({ ...(await prepareRecordingSummary(record.id)), confirmed: true as const, llmModel: 'deepseek' })
 
+test('reuses a completed whole-file job only after validating its audio identity', async () => {
+  const { API_BASE_URL } = require('../src/config/env')
+  record.transcriptionCheckpoint = undefined
+  record.meetingFilePrepared = { wavUri: 'file:///cache/asr.wav', checkpoint: { version: 1,
+    job: { id: '4d030132-7222-401c-80c5-c352b0c1e5cf', owner: 'alice', model: 'aliyun', phase: 'result' },
+    binding: { origin: API_BASE_URL.replace(/\/+$/, ''), providerModel: 'bigmodel', originalSha256: 'a'.repeat(64), wavSha256: 'b'.repeat(64), wavBytes: 12345, duration: 1376.549 },
+    result: { text: '完整会议转写', segments: [] } } }
+  FS.hash = jest.fn().mockResolvedValue('a'.repeat(64))
+  const prepared = await prepareRecordingSummary(record.id)
+  expect(prepared.transcript).toContain('完整会议转写')
+  jest.mocked(FS.hash).mockResolvedValue('c'.repeat(64))
+  await expect(prepareRecordingSummary(record.id)).rejects.toThrow()
+})
+
 test('full saved sample creates next version with selected LLM and zero ASR/speaker/selection writes', async () => {
   const oldAsr = record.transcriptionCheckpoint, oldSpeaker = record.speakerCheckpoint
   await generateRecordingSummary(await confirm(), jest.fn())

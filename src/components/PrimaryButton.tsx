@@ -7,7 +7,7 @@ import { LoadingDots } from './LoadingDots'
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable)
 
-export function PrimaryButton({ title, loading, secondary, tertiary, disabled, style, ...props }: { title: string; loading?: boolean; secondary?: boolean; tertiary?: boolean } & PressableProps) {
+export function PrimaryButton({ title, loading, secondary, tertiary, disabled, style, icon, ...props }: { title: string; loading?: boolean; secondary?: boolean; tertiary?: boolean; icon?: React.ReactNode } & PressableProps) {
   const unavailable = !!disabled || !!loading
   const reduced = useReducedMotion(), scale = useRef(new Animated.Value(1)).current
   const [pressed, setPressed] = useState(false)
@@ -19,6 +19,7 @@ export function PrimaryButton({ title, loading, secondary, tertiary, disabled, s
     accessibilityState={{ disabled: unavailable, busy: !!loading }}
     style={[tertiary ? styles.textButton : secondary ? styles.secondaryButton : styles.button, { flexDirection: 'row', gap: 9, transform: [{ scale }] }, unavailable && { opacity: loading ? 0.8 : 0.42 }, pressed && { opacity: 0.82 }, typeof style === 'function' ? style({ pressed }) : style]}>
     {loading && <LoadingDots color={secondary || tertiary ? colors.primary : colors.onPrimary} />}
+    {!loading && icon}
     <Text style={tertiary ? styles.textButtonText : secondary ? styles.secondaryButtonText : styles.buttonText}>{title}</Text>
   </AnimatedPressable>
 }

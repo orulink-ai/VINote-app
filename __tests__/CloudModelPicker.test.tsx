@@ -5,9 +5,10 @@ import { Text } from '../src/components/AppText'
 import { loadModels, loadSelection, saveSelection } from '../src/lib/models'
 import { PrimaryButton } from '../src/components/PrimaryButton'
 jest.mock('../src/lib/models', () => ({ loadModels: jest.fn(), loadSelection: jest.fn(), saveSelection: jest.fn() }))
+const fileCapabilities = { recordedAudio: { protocol: 1, supported: true, strategy: 'single_request', policySource: 'provider_model' }, useCases: ['meeting'], protocols: ['asr-recording'], audioFormats: ['wav'], audioDelivery: 'public', speakerDiarization: true, utteranceTimestamps: true, maxAudioSeconds: 3600, maxAudioBytes: 100000000 }
 test.each(['service_error', 'quota_exhausted'])('picker preserves original model and readiness matches %s', async status => {
   jest.mocked(loadModels).mockResolvedValue([
-    { id: 'original', modelType: 'asr', runtimeStatus: 'not_available', availability: { status, retryAt: Date.now() - 1 } },
+    { id: 'original', modelType: 'asr', runtimeStatus: 'not_available', availability: { status, retryAt: Date.now() - 1 }, capabilities: fileCapabilities },
     { id: 'summary', modelType: 'llm', runtimeStatus: 'available' },
   ])
   jest.mocked(loadSelection).mockResolvedValue({ asr_model: 'original', llm_model: 'summary' })
@@ -27,9 +28,22 @@ test.each(['service_error', 'quota_exhausted'])('picker preserves original model
 const asr = 'asr:6:aliyun:22:paraformer-realtime-v2'
 const llm = 'llm:4:luna:6:chosen'
 const copy = (view: Renderer.ReactTestRenderer) => view.root.findAllByType(Text).map(node => node.props.children).flat().join(' ')
+test('the settings picker hides a streaming-only model', async () => {
+  jest.mocked(loadModels).mockResolvedValueOnce([
+    { id: 'stream', modelType: 'asr', runtimeStatus: 'available', name: '流式识别' },
+    { id: 'file', modelType: 'asr', runtimeStatus: 'available', name: '录音文件识别', capabilities: fileCapabilities },
+    { id: 'summary', modelType: 'llm', runtimeStatus: 'available' },
+  ])
+  jest.mocked(loadSelection).mockResolvedValueOnce({ asr_model: '', llm_model: 'summary' })
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<CloudModelPicker disabled={false} onReady={jest.fn()} />) })
+  expect(copy(view)).toContain('录音文件识别')
+  expect(copy(view)).not.toContain('流式识别')
+  await act(async () => view.unmount())
+})
 async function mountCatalog(models: Awaited<ReturnType<typeof loadModels>>) {
   jest.clearAllMocks()
-  jest.mocked(loadModels).mockResolvedValue(models)
+  jest.mocked(loadModels).mockResolvedValue(models.map(m => m.modelType === 'asr' ? { ...m, capabilities: fileCapabilities } : m))
   jest.mocked(loadSelection).mockResolvedValue({ asr_model: asr, llm_model: llm })
   jest.mocked(saveSelection).mockResolvedValue({ asr_model: asr, llm_model: llm })
   let view!: Renderer.ReactTestRenderer
@@ -80,21 +94,16 @@ test('unselected transient service health never claims a failed recording or reu
   await act(async () => view.unmount())
 })
 
-test.each([true, false])('ASR policy %s explains invocation method without disabling model capability selection', async hasPolicy => {
+test.each([true, false])('only a meeting file ASR is selectable (file capability: %s)', async hasPolicy => {
   const ready = jest.fn()
   jest.mocked(loadModels).mockResolvedValue([
-    { id: asr, modelType: 'asr', runtimeStatus: 'available', ...(hasPolicy ? { capabilities: { recordedAudio: {
-      protocol: 1, supported: true, strategy: 'adaptive_pause', maxSessionAudioBytes: 2097152, policySource: 'service_budget',
-    } } } : {}) },
+    { id: asr, modelType: 'asr', runtimeStatus: 'available', ...(hasPolicy ? { capabilities: fileCapabilities } : {}) },
     { id: llm, modelType: 'llm', runtimeStatus: 'available' },
   ])
   jest.mocked(loadSelection).mockResolvedValue({ asr_model: asr, llm_model: llm })
   let view!: Renderer.ReactTestRenderer
   await act(async () => { view = Renderer.create(<CloudModelPicker disabled={false} onReady={ready} />) })
-  expect(ready).toHaveBeenLastCalledWith(true)
-  expect(copy(view)).toContain(hasPolicy ? '适用于录音与会议纪要' : '录音转写尚未就绪')
-  expect(copy(view)).not.toContain('模型不支持')
-  await act(async () => view.root.findByType(PrimaryButton).props.onPress())
-  expect(copy(view)).toContain(hasPolicy ? '始终使用所选模型' : '录音转写尚未就绪')
+  expect(ready).toHaveBeenLastCalledWith(hasPolicy)
+  expect(copy(view)).toContain(hasPolicy ? '适用于会议完整录音文件识别' : '暂无可用的录音文件识别模型')
   await act(async () => view.unmount())
 })

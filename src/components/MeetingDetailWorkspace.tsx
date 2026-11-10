@@ -11,6 +11,7 @@ import {
   Pressable,
   ScrollView,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native'
 import Sound from 'react-native-nitro-sound'
@@ -34,6 +35,8 @@ import { chatCompletion } from '../lib/chatCompletion'
 import { loadSelection } from '../lib/models'
 import { readAccountId } from '../lib/storage'
 import { MeetingMarkdown } from './MeetingMarkdown'
+import { omitDuplicateTitle } from '../lib/markdown'
+import { displayRecordingTitle } from '../features/recording/recordingTitle'
 import { PrimaryButton } from './PrimaryButton'
 import { FeishuDeliveryPanel } from './FeishuDeliveryPanel'
 import { FeishuDocumentFooter } from './FeishuDocumentFooter'
@@ -65,6 +68,8 @@ export function MeetingDetailWorkspace({
   initialTab?: '纪要' | '对话'
 }) {
   const reduced = useReducedMotion()
+  const { width, height } = useWindowDimensions()
+  const compactPlayer = width > height && height < 600
   const [tab, setTab] = useState<string>(initialTab)
   const [recording, setRecording] = useState<LocalRecording | null>(null)
   const [playing, setPlaying] = useState(false)
@@ -287,7 +292,7 @@ export function MeetingDetailWorkspace({
           <>
             <View style={[styles.card, { padding: 14 }]}>
               <MeetingMarkdown
-                content={note.content || '暂时没有正文。'}
+                content={note.content ? omitDuplicateTitle(note.content, isMeeting ? displayRecordingTitle(note.title) : note.title) : '暂时没有正文。'}
                 onTimestamp={recording ? seconds => void play(seconds) : undefined}
               />
             </View>
@@ -417,7 +422,7 @@ export function MeetingDetailWorkspace({
           </Text>
         ) : null}
         {recording ? (
-          <>
+          <View style={compactPlayer ? { flexDirection: 'row', alignItems: 'center', gap: 8 } : undefined}>
             <Pressable
               accessibilityRole="adjustable"
               accessibilityLabel="录音播放进度"
@@ -458,7 +463,7 @@ export function MeetingDetailWorkspace({
                   ),
                 )
               }
-              style={{ minHeight: 48, justifyContent: 'center' }}
+              style={{ minHeight: 44, justifyContent: 'center', ...(compactPlayer ? { flex: 1 } : {}) }}
             >
               <View style={{ height: 3, backgroundColor: colors.line }}>
                 <View
@@ -474,7 +479,7 @@ export function MeetingDetailWorkspace({
               </View>
             </Pressable>
             <View
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, ...(compactPlayer ? { minWidth: 220 } : {}) }}
             >
               <Pressable
                 accessibilityRole="button"
@@ -525,7 +530,7 @@ export function MeetingDetailWorkspace({
               </Text>
 
             </View>
-          </>
+          </View>
         ) : (
           <Text style={styles.subtitle}>{mediaLoading ? '正在读取原录音…' : mediaError || (note.source_device ? `原音在${sourceLabel}，本机可阅读文字` : '录音库不可用')}</Text>
         )}

@@ -38,7 +38,7 @@ jest.mock('../src/screens/FileLibraryScreen', () => ({ FileLibraryScreen: () => 
 jest.mock('../src/screens/SettingsScreen', () => ({ SettingsScreen: () => null }))
 jest.mock('../src/screens/ConnectionsScreen', () => ({ ConnectionsScreen: () => null }))
 jest.mock('../src/screens/NoteIntakeScreen', () => ({ NoteIntakeScreen: () => null }))
-jest.mock('../src/screens/RecordingsScreen', () => ({ RecordingsScreen: () => null }))
+jest.mock('../src/screens/RecordingsScreen', () => ({ RecordingsScreen: () => { const { ScreenHeader } = require('../src/components/ScreenHeader'); return <ScreenHeader title="会议" /> } }))
 jest.mock('../src/components/GlobalTaskStatus', () => ({ GlobalTaskStatus: () => null }))
 jest.mock('react-native-nitro-sound', () => ({ __esModule: true, default: {} }))
 jest.mock('react-native-keychain', () => ({ getGenericPassword: jest.fn(async () => false), setGenericPassword: jest.fn(), resetGenericPassword: jest.fn() }))
@@ -54,7 +54,7 @@ it('continues an exact source receipt through history and returns to the same hi
   expect(app.root.findByType(NoteDetailScreen).props.id).toBe('saved-original')
   await act(async () => { app.root.findByType(NoteDetailScreen).props.onBack() })
   await act(async () => { app.root.findByType(TasksScreen).props.onBack() })
-  expect(app.root.findByType(NotesScreen)).toBeDefined()
+  expect(app.root.findByType(RecordingsScreen).props.home).toBe(true)
   await act(async () => app.unmount())
 })
 
@@ -74,10 +74,10 @@ it('returns from exact note sources to the same detail and then its original fil
 it('detail exposes no sync callback and returns to its original list', async () => {
   let app!: Renderer.ReactTestRenderer
   await act(async () => { app = Renderer.create(<App />) })
-  await act(async () => { app.root.findByType(NotesScreen).props.onOpen('original-note') })
+  await act(async () => { app.root.findByType(RecordingsScreen).props.onOpenNote('original-note') })
   expect(app.root.findByType(NoteDetailScreen).props.onSync).toBeUndefined()
   await act(async () => { app.root.findByType(NoteDetailScreen).props.onBack() })
-  expect(app.root.findByType(NotesScreen)).toBeDefined()
+  expect(app.root.findByType(RecordingsScreen).props.home).toBe(true)
   await act(async () => app.unmount())
 })
 
@@ -103,70 +103,86 @@ it('returns from a note to the data settings that opened it, then to the account
 it('returns from linked content to the file library that opened it', async () => {
   let app!: Renderer.ReactTestRenderer
   await act(async () => { app = Renderer.create(<App />) })
-  await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('files') })
+  await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('notes') })
+  await act(async () => { app.root.findByType(NotesScreen).props.onOriginals() })
   const position = { purpose: 'note', category: 'video', query: 'source', unassigned: false }
   await act(async () => { app.root.findByType(FileLibraryScreen).props.onViewChange(position) })
   await act(async () => { app.root.findByType(FileLibraryScreen).props.onOpenNote('file-note') })
-  expect(app.root.findByType(NoteDetailScreen).props.backLabel).toBe('文件库')
+  expect(app.root.findByType(NoteDetailScreen).props.backLabel).toBe('原文件')
   await act(async () => { app.root.findByType(NoteDetailScreen).props.onBack() })
   expect(app.root.findByType(FileLibraryScreen)).toBeDefined()
   expect(app.root.findByType(FileLibraryScreen).props.view).toEqual(position)
-  expect(app.root.findByType(WorkspaceNavigation).props.selected).toBe('files')
+  expect(app.root.findAllByType(WorkspaceNavigation)).toHaveLength(0)
+  await act(async () => { app.root.findByType(FileLibraryScreen).props.onBack() })
+  expect(app.root.findByType(NotesScreen).props.kind).toBe('note')
   await act(async () => { app.unmount() })
 })
 
 it('returns from file generation and recording sources to the same material group', async () => {
   let app!: Renderer.ReactTestRenderer
   await act(async () => { app = Renderer.create(<App />) })
-  await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('files') })
+  await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('notes') })
+  await act(async () => { app.root.findByType(NotesScreen).props.onOriginals() })
   const position = { purpose: 'note', category: 'file', query: 'word', unassigned: false }
   await act(async () => { app.root.findByType(FileLibraryScreen).props.onViewChange(position) })
   const file = { id: 'original', name: 'word.docx', purpose: 'note' }
   await act(async () => { app.root.findByType(FileLibraryScreen).props.onSummarize(file) })
   expect(app.root.findByType(NoteIntakeScreen).props.initialFile).toBe(file)
-  expect(app.root.findByType(NoteIntakeScreen).props.backLabel).toBe('返回文件库')
+  expect(app.root.findByType(NoteIntakeScreen).props.backLabel).toBe('返回原文件')
   await act(async () => { app.root.findByType(NoteIntakeScreen).props.onBack() })
   expect(app.root.findByType(FileLibraryScreen).props.view).toEqual(position)
   await act(async () => { app.unmount() })
 })
 
-it('meeting sources open the meeting-material group and an exact recording returns there', async () => {
+it('meeting home opens an associated minute and returns to meetings', async () => {
   let app!: Renderer.ReactTestRenderer
   await act(async () => { app = Renderer.create(<App />) })
-  await act(async () => { app.root.findByType(NotesScreen).props.onOriginals() })
-  expect(app.root.findByType(FileLibraryScreen).props.view).toEqual({ purpose: 'meeting', category: 'all', query: '' })
-  await act(async () => { app.root.findByType(FileLibraryScreen).props.onRecording('long-original-recording') })
-  expect(app.root.findByType(RecordingsScreen).props.initialFocusId).toBe('long-original-recording')
-  expect(app.root.findByType(RecordingsScreen).props.initialGenerateId).toBeNull()
-  expect(app.root.findByType(RecordingsScreen).props.backLabel).toBe('返回文件库')
+  expect(app.root.findByType(RecordingsScreen).props.home).toBe(true)
+  await act(async () => { app.root.findByType(RecordingsScreen).props.onOpenNote('meeting-note', 'recording-1') })
+  expect(app.root.findByType(NoteDetailScreen).props.id).toBe('meeting-note')
+  await act(async () => { app.root.findByType(NoteDetailScreen).props.onBack() })
+  expect(app.root.findByType(RecordingsScreen).props.initialFocusId).toBe('recording-1')
   await act(async () => { app.root.findByType(RecordingsScreen).props.onBack() })
-  expect(app.root.findByType(FileLibraryScreen).props.view.purpose).toBe('meeting')
-  await act(async () => { app.unmount() })
+  expect(app.root.findByType(RecordingsScreen).props.home).toBe(true)
+  await act(async () => app.unmount())
 })
 
 it('opens task recovery from a main page and returns to that page', async () => {
   let app!: Renderer.ReactTestRenderer
   await act(async () => { app = Renderer.create(<App />) })
-  await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('connections') })
-  await act(async () => { app.root.findByType(GlobalTaskStatus).props.onPress() })
-  expect(app.root.findByType(TasksScreen).props.backLabel).toBe('返回插件')
+  await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('tasks') })
+  expect(app.root.findByType(TasksScreen).props.backLabel).toBe('返回会议')
+  expect(app.root.findByType(TasksScreen).props.showBack).toBe(false)
   await act(async () => { app.root.findByType(TasksScreen).props.onBack() })
-  expect(app.root.findByType(ConnectionsScreen)).toBeDefined()
+  expect(app.root.findByType(RecordingsScreen).props.home).toBe(true)
   await act(async () => { app.unmount() })
 })
 
-it('returns from plugin settings to settings and preserves the account origin', async () => {
+it('shows a return action when tasks were opened from account', async () => {
   let app!: Renderer.ReactTestRenderer
   await act(async () => { app = Renderer.create(<App />) })
-  await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('files') })
+  await act(async () => { app.root.findAll(node => node.props.accessibilityLabel === '账号与设置' && typeof node.props.onPress === 'function')[0].props.onPress() })
+  await act(async () => { app.root.findByType(AccountScreen).props.onTasks() })
+  expect(app.root.findByType(TasksScreen).props.showBack).toBe(true)
+  expect(app.root.findByType(TasksScreen).props.backLabel).toBe('返回账号')
+  await act(async () => { app.root.findByType(TasksScreen).props.onBack() })
+  expect(app.root.findByType(AccountScreen)).toBeDefined()
+  await act(async () => app.unmount())
+})
+
+it('returns from Feishu settings to settings and preserves the account origin', async () => {
+  const { FeishuSettingsScreen } = require('../src/screens/FeishuSettingsScreen')
+  let app!: Renderer.ReactTestRenderer
+  await act(async () => { app = Renderer.create(<App />) })
+  await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('notes') })
   await act(async () => { app.root.findAll(node => node.props.accessibilityLabel === '账号与设置' && typeof node.props.onPress === 'function')[0].props.onPress() })
   await act(async () => { app.root.findByType(AccountScreen).props.onSettings() })
   await act(async () => { app.root.findByType(SettingsScreen).props.onConnections() })
-  expect(app.root.findAllByType(WorkspaceNavigation)).toHaveLength(0)
-  await act(async () => { app.root.findByType(ConnectionsScreen).props.onBack() })
+  expect(app.root.findByType(FeishuSettingsScreen)).toBeDefined()
+  await act(async () => { app.root.findByType(FeishuSettingsScreen).props.onBack() })
   await act(async () => { app.root.findByType(SettingsScreen).props.onBack() })
   await act(async () => { app.root.findByType(AccountScreen).props.onBack() })
-  expect(app.root.findByType(FileLibraryScreen)).toBeDefined()
+  expect(app.root.findByType(NotesScreen).props.kind).toBe('note')
   await act(async () => { app.unmount() })
 })
 
@@ -187,34 +203,26 @@ it('opens link/file summarization from Notes and returns generated content to No
   await act(async () => { app.unmount() })
 })
 
-it('retains separate meeting and note filters across detail return and category switches', async () => {
+it('preserves the note filter after visiting the recording-based meeting home', async () => {
   let app!: Renderer.ReactTestRenderer
   await act(async () => { app = Renderer.create(<App />) })
-  expect(app.root.findByType(NotesScreen).props.kind).toBe('meeting')
+  expect(app.root.findByType(RecordingsScreen).props.home).toBe(true)
   await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('notes') })
   const noteView = { query: 'document-review.pdf', filter: '文字', project: '' }
   await act(async () => { app.root.findByType(NotesScreen).props.onViewChange(noteView) })
-  await act(async () => { app.root.findByType(NotesScreen).props.onOpen('note-filtered') })
-  await act(async () => { app.root.findByType(NoteDetailScreen).props.onBack() })
-  expect(app.root.findByType(NotesScreen).props.view).toEqual(noteView)
   await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('meetings') })
-  expect(app.root.findByType(NotesScreen).props.view).toEqual({ query: '', filter: '全部', project: '' })
-  const meetingView = { query: 'review', filter: '归档', project: '产品' }
-  await act(async () => { app.root.findByType(NotesScreen).props.onViewChange(meetingView) })
+  expect(app.root.findByType(RecordingsScreen).props.home).toBe(true)
   await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('notes') })
   expect(app.root.findByType(NotesScreen).props.view).toEqual(noteView)
-  await act(async () => { app.root.findByType(WorkspaceNavigation).props.onNavigate('meetings') })
-  expect(app.root.findByType(NotesScreen).props.view).toEqual(meetingView)
-  await act(async () => { app.unmount() })
+  await act(async () => app.unmount())
 })
-
 
 it('returns a delivery settings intent once to its original saved detail and clears it on consumption', async () => {
   const { FeishuSettingsScreen } = require('../src/screens/FeishuSettingsScreen')
   const { deliverySettingsReturn } = require('../src/lib/feishuDeliveryReturn')
   let app!: Renderer.ReactTestRenderer
   await act(async () => { app = Renderer.create(<App />) })
-  await act(async () => app.root.findByType(NotesScreen).props.onOpen('original-note'))
+  await act(async () => app.root.findByType(RecordingsScreen).props.onOpenNote('original-note'))
   const intent = deliverySettingsReturn('original-note', { owner: 'owner', noteKey: 'original-note', operationId: 'op' })
   await act(async () => app.root.findByType(NoteDetailScreen).props.onSettings(intent))
   const back = app.root.findByType(FeishuSettingsScreen).props.onBack
@@ -232,7 +240,7 @@ it('drops an old delivery intent after an account ABA instead of navigating to o
   const { transitionIdentity } = require('../src/lib/sessionIdentity')
   let app!: Renderer.ReactTestRenderer
   await act(async () => { app = Renderer.create(<App />) })
-  await act(async () => app.root.findByType(NotesScreen).props.onOpen('original-note'))
+  await act(async () => app.root.findByType(RecordingsScreen).props.onOpenNote('original-note'))
   const intent = deliverySettingsReturn('original-note', { owner: 'owner', noteKey: 'original-note', operationId: 'op' })
   await act(async () => app.root.findByType(NoteDetailScreen).props.onSettings(intent))
   const delayedBack = app.root.findByType(FeishuSettingsScreen).props.onBack
