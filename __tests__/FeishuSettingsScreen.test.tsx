@@ -7,16 +7,29 @@ import { SettingsCheckbox } from '../src/components/SettingsCheckbox'
 import { ScreenHeader } from '../src/components/ScreenHeader'
 import { FeishuDestinationPicker } from '../src/components/FeishuDestinationPicker'
 import { Alert } from 'react-native'
-import { readFeishuLocalPreferences, saveFeishuLocalPreferences } from '../src/lib/feishuLocalPreferences'
+import { hasFeishuLocalPreferences, readFeishuLocalPreferences, saveFeishuLocalPreferences } from '../src/lib/feishuLocalPreferences'
 import { readAccountId } from '../src/lib/storage'
 import { transitionIdentity } from '../src/lib/sessionIdentity'
 jest.mock('../src/lib/feishu', () => ({ feishuApi: jest.fn() }))
 jest.mock('../src/lib/storage', () => ({ readAccountId: jest.fn(async () => 'owner') }))
-jest.mock('../src/lib/feishuLocalPreferences', () => ({ readFeishuLocalPreferences: jest.fn(async () => ({ notify_self: true, groups: [], destination_config: { kind: 'personal' }, permission_policy: 'private' })), saveFeishuLocalPreferences: jest.fn(async () => {}) }))
+jest.mock('../src/lib/feishuLocalPreferences', () => ({ hasFeishuLocalPreferences: jest.fn(async () => true), readFeishuLocalPreferences: jest.fn(async () => ({ notify_self: true, groups: [], destination_config: { kind: 'personal' }, permission_policy: 'private' })), saveFeishuLocalPreferences: jest.fn(async () => {}) }))
 // These tests exercise preferences and connection state. Application credential
 // management has separate requests and is not covered by this unit fixture.
 jest.mock('../src/components/FeishuApplicationSetup', () => ({ FeishuApplicationSetup: () => null }))
 afterEach(() => jest.clearAllMocks())
+
+test('first use explains local defaults and allows saving them explicitly', async () => {
+  jest.mocked(hasFeishuLocalPreferences).mockResolvedValueOnce(false)
+  jest.mocked(feishuApi).mockResolvedValueOnce({ configured: true, connected: true, expired: false, name: '测试', notify_self: true, groups: [], auto_publish: false }).mockResolvedValueOnce([])
+  let view!: Renderer.ReactTestRenderer
+  await act(async () => { view = Renderer.create(<FeishuSettingsScreen onBack={jest.fn()} />) })
+  expect(JSON.stringify(view.toJSON())).toContain('旧设备或旧版设置不会自动同步')
+  const save = view.root.findAllByType(PrimaryButton).find(node => node.props.title === '保存设置')!
+  expect(save.props.disabled).toBe(false)
+  await act(async () => save.props.onPress())
+  expect(saveFeishuLocalPreferences).toHaveBeenCalled()
+  await act(async () => view.unmount())
+})
 
 test('account change invalidates the old settings draft before it can be saved', async () => {
   jest.mocked(feishuApi).mockResolvedValueOnce({ configured: true, connected: true, expired: false, name: '测试', notify_self: true, groups: [], auto_publish: false }).mockResolvedValueOnce([])

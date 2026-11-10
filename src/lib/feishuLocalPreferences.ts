@@ -8,6 +8,12 @@ const defaults = (): FeishuLocalPreferences => ({ notify_self: true, groups: [],
 async function scope(owner: string, epoch: number) {
   if (!owner || identityEpoch() !== epoch || await readAccountId() !== owner || identityEpoch() !== epoch) throw new Error('账号已变化，请重新打开飞书设置')
 }
+export async function hasFeishuLocalPreferences(owner: string): Promise<boolean> {
+  const epoch = identityEpoch(); await scope(owner, epoch)
+  const raw = await Storage.getItem(`vinote:${owner}:feishu-local-preferences`)
+  await scope(owner, epoch)
+  return raw !== null && raw !== undefined
+}
 export async function readFeishuLocalPreferences(owner: string): Promise<FeishuLocalPreferences> {
   const epoch = identityEpoch(); await scope(owner, epoch)
   const raw = await Storage.getItem(`vinote:${owner}:feishu-local-preferences`)

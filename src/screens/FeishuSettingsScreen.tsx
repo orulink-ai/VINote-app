@@ -23,7 +23,7 @@ import { colors, styles } from '../design-system/theme'
 import { FeishuApplicationSetup } from '../components/FeishuApplicationSetup'
 import { FeishuDestinationPicker } from '../components/FeishuDestinationPicker'
 import { readAccountId } from '../lib/storage'
-import { readFeishuLocalPreferences, saveFeishuLocalPreferences } from '../lib/feishuLocalPreferences'
+import { hasFeishuLocalPreferences, readFeishuLocalPreferences, saveFeishuLocalPreferences } from '../lib/feishuLocalPreferences'
 import { identityEpoch, subscribeIdentity } from '../lib/sessionIdentity'
 
 export function FeishuSettingsScreen({ onBack, navigationGuard }: {
@@ -45,6 +45,7 @@ export function FeishuSettingsScreen({ onBack, navigationGuard }: {
   const [authorization, setAuthorization] = useState<FeishuAuthorization | null>(null)
   const [authExpired, setAuthExpired] = useState(false)
   const [connectionExpanded, setConnectionExpanded] = useState(false)
+  const [localDefaults, setLocalDefaults] = useState(false)
   const draftScope = useRef<{ owner: string; epoch: number } | null>(null)
   const section = { backgroundColor: colors.card, paddingHorizontal: 14, paddingVertical: 12, gap: 8, borderRadius: 12 } as const
   const load = async (preserveDraft = true) => {
@@ -56,9 +57,11 @@ export function FeishuSettingsScreen({ onBack, navigationGuard }: {
       const owner = await readAccountId()
       if (!owner) throw new Error('请重新登录')
       const next = { ...await feishuApi<FeishuStatus>('/status', {}, owner), ...await readFeishuLocalPreferences(owner), auto_publish: false }
+      const savedLocally = await hasFeishuLocalPreferences(owner)
       if (identityEpoch() !== epoch || await readAccountId() !== owner || identityEpoch() !== epoch) return false
       const sameDraft = draftScope.current?.owner === owner && draftScope.current?.epoch === epoch
       draftScope.current = { owner, epoch }
+      setLocalDefaults(!savedLocally)
       setValue(current => dirty && preserveDraft && sameDraft && current ? { ...next, notify_self: current.notify_self, groups: current.groups, auto_publish: current.auto_publish, destination_config: current.destination_config, permission_policy: current.permission_policy } : next)
       if (!preserveDraft || !dirty) setDirty(false)
       setGroupError('')
@@ -92,7 +95,7 @@ export function FeishuSettingsScreen({ onBack, navigationGuard }: {
   }, [])
   useEffect(() => subscribeIdentity(() => {
     draftScope.current = null
-    setValue(null); setGroups([]); setGroupPicker(false); setDirty(false); setBusy(false)
+    setValue(null); setGroups([]); setGroupPicker(false); setDirty(false); setBusy(false); setLocalDefaults(false)
     setAuthUrl(''); setAuthorization(null); setMessage(''); setError('账号已切换，请重新打开飞书设置。')
   }), [])
   const loadRef = useRef(load)
@@ -255,6 +258,7 @@ export function FeishuSettingsScreen({ onBack, navigationGuard }: {
         {value && <View
           style={section}
         >
+          {localDefaults && <Text accessibilityRole="alert" style={styles.subtitle}>本机尚未保存飞书设置，当前使用个人云文档和本人通知的默认值；旧设备或旧版设置不会自动同步，请核对后保存。</Text>}
           <FeishuDestinationPicker value={value?.destination_config || { kind: 'personal' }} disabled={!!disabled} onChange={destination_config => change({ destination_config, permission_policy: destination_config.kind === 'personal' ? 'private' : 'inherit' })} />
         </View>}
         {value && <View
@@ -275,7 +279,7 @@ export function FeishuSettingsScreen({ onBack, navigationGuard }: {
         </View>}
         <FeishuApplicationSetup onChanged={() => void load(false)} />
       </ScrollView>
-      {dirty && <View
+      {(dirty || localDefaults) && <View
         style={{
           padding: 20,
           gap: 10,
@@ -287,13 +291,13 @@ export function FeishuSettingsScreen({ onBack, navigationGuard }: {
         }}
       >
         <Text accessibilityLiveRegion="polite" style={[styles.subtitle, { flex: 1 }]}>
-          {saveFailed && dirty ? '保存失败，修改已保留，请重试保存。' : error && dirty ? '操作未完成，未保存修改仍保留。' : message || (dirty ? '有未保存修改' : '设置保存在当前设备')}
+          {saveFailed ? '保存失败，请重试保存。' : error && dirty ? '操作未完成，未保存修改仍保留。' : message || (dirty ? '有未保存修改' : '请核对并保存本机设置')}
         </Text>
         <PrimaryButton
           style={{ minHeight: 44, paddingHorizontal: 14 }}
-          title={saveFailed && dirty ? '重试保存' : '保存设置'}
+          title={saveFailed ? '重试保存' : '保存设置'}
           loading={busy}
-          disabled={!!disabled || !dirty}
+          disabled={!!disabled || (!dirty && !localDefaults)}
           onPress={async () => {
             if (!value) return
             setBusy(true)
@@ -305,6 +309,7 @@ export function FeishuSettingsScreen({ onBack, navigationGuard }: {
               if (!owner) throw new Error('请重新登录')
               if (!scope || scope.owner !== owner || scope.epoch !== identityEpoch()) throw new Error('账号已切换，请重新打开飞书设置')
               await saveFeishuLocalPreferences(owner, { notify_self: value.notify_self, groups: value.groups, destination_config: value.destination_config || { kind: 'personal' }, permission_policy: value.permission_policy || 'private' })
+              setLocalDefaults(false)
               setDirty(false)
               setMessage('设置已保存')
             } catch (cause) {
