@@ -14,7 +14,7 @@ afterEach(() => jest.clearAllMocks())
 const note = { id: 'note-1', title: '会议', content: '# 纪要' } as Note
 
 test('warns before publishing with unsaved device defaults', async () => {
-  jest.mocked(hasFeishuLocalPreferences).mockResolvedValueOnce(false)
+  jest.mocked(hasFeishuLocalPreferences).mockResolvedValue(false)
   jest.mocked(feishuApi).mockImplementation(async path => path === '/status' ? { publish_receipt_protocol: 1, recipient_access_protocol: 1, configured: true, connected: true, expired: false, notify_self: false, groups: [] } : { name: '个人云文档', path: ['个人云文档'], path_complete: true, can_create: true, can_attempt_create: true })
   jest.mocked(deliveryStatus).mockResolvedValueOnce(null)
   let view!: Renderer.ReactTestRenderer
@@ -22,6 +22,10 @@ test('warns before publishing with unsaved device defaults', async () => {
   expect(JSON.stringify(view.toJSON())).toContain('旧设备或旧版设置不会自动同步')
   expect(publishToFeishu).not.toHaveBeenCalled()
   await act(async () => view.unmount())
+  await act(async () => { view = Renderer.create(<FeishuDeliveryPanel note={note} />) })
+  expect(JSON.stringify(view.toJSON())).toContain('旧设备或旧版设置不会自动同步')
+  await act(async () => view.unmount())
+  jest.mocked(hasFeishuLocalPreferences).mockResolvedValue(true)
 })
 
 test('cannot publish before status is read, and retry recovers a failed read', async () => {

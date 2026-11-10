@@ -165,11 +165,12 @@ export function FeishuDeliveryPanel({
       setReceiptSupported(settings.publish_receipt_protocol === 1)
       setContactProtocol(settings.contact_selection_protocol === 1)
       setContactSupported(settings.contact_selection_protocol === 1 && settings.capabilities?.contact_search === true && settings.connected && !settings.expired)
+      const savedLocally = await hasFeishuLocalPreferences(owner)
+      if (sequence !== requestSequence.current) return
+      setLocalDefaults(!savedLocally)
       if (!initialized.current) {
         const localPreferences = await readFeishuLocalPreferences(owner)
-        const savedLocally = await hasFeishuLocalPreferences(owner)
         if (sequence !== requestSequence.current) return
-        setLocalDefaults(!savedLocally)
         setOptions(localPreferences)
         initialized.current = true
       }
