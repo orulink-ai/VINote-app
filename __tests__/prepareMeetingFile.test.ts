@@ -1,10 +1,11 @@
 import FS from 'react-native-fs'
-import { NativeModules } from 'react-native'
+import { NativeModules, Platform } from 'react-native'
 import { prepareMeetingFile } from '../src/lib/prepareMeetingFile'
-jest.mock('react-native-fs', () => ({ DocumentDirectoryPath: '/data', CachesDirectoryPath: '/cache', stat: jest.fn(), hash: jest.fn(), exists: jest.fn(), unlink: jest.fn() }))
+jest.mock('react-native-fs', () => ({ DocumentDirectoryPath: '/data', CachesDirectoryPath: '/cache', TemporaryDirectoryPath: '/ios-tmp/', stat: jest.fn(), hash: jest.fn(), exists: jest.fn(), unlink: jest.fn() }))
 const input = { uri: 'file:///data/recordings/accounts/owner/source.m4a', origin: 'https://api.example.com', owner: 'owner', model: 'catalog-id', providerModel: 'bigmodel', id: '4d030132-7222-401c-80c5-c352b0c1e5cf', policy: { maxAudioBytes: 1000, maxAudioSeconds: 100 }, guard: jest.fn(async () => {}) }
 beforeEach(() => {
   jest.clearAllMocks()
+  jest.replaceProperty(Platform, 'OS', 'android')
   ;(FS.stat as jest.Mock).mockImplementation(async (path: string) => ({ size: path.endsWith('.wav') ? 500 : 300 }))
   ;(FS.hash as jest.Mock).mockImplementation(async (path: string) => (path.endsWith('.wav') ? 'b' : 'a').repeat(64))
   ;(FS.exists as jest.Mock).mockResolvedValue(true)
@@ -39,4 +40,17 @@ test('extracts audio instead of uploading a container with other tracks', async 
   expect(prepared.wavUri).toMatch(/\.wav$/)
   expect(prepared.checkpoint.binding.audioFormat).toBeUndefined()
   expect(NativeModules.MeetingAudio.toWav).toHaveBeenCalledWith(input.uri)
+})
+
+afterEach(() => jest.restoreAllMocks())
+
+test('prepares the WAV returned by the native iOS temporary directory', async () => {
+  jest.replaceProperty(Platform, 'OS', 'ios')
+  const wavUri = 'file:///ios-tmp/asr-4d030132-7222-401c-80c5-c352b0c1e5cf.wav'
+  NativeModules.MeetingAudio.toWav.mockResolvedValue(wavUri)
+
+  await expect(prepareMeetingFile(input)).resolves.toMatchObject({
+    wavUri,
+    checkpoint: { binding: { wavBytes: 500, wavSha256: 'b'.repeat(64) } },
+  })
 })

@@ -45,7 +45,15 @@ npm 脚本会自动选择对应配置。直接运行 Gradle 前需先选择通�
 
 在 Mac 上执行 `npm ci`、`bundle install`、`cd ios && bundle exec pod install`，再打开 `ios/VINoteApp.xcworkspace`。开发可在仓库根目录执行 `npm run ios` 并运行 Metro；真机需要在 Xcode 中选择开发团队和签名配置。
 
-正式版归档前执行 `npm run config:public` 和 `npm run config:check:release`；测试版归档前执行 `npm run config:test` 和 `npm run config:check`，在 Xcode 选择真实设备/通用 iOS 设备、Release 和 Product → Archive，再通过 Organizer 按证书配置导出或分发。没有在 Windows 生成可安装 IPA 的脚本；尚无已验证的 iOS Release 产物。音频、导入、后台录音、局域网权限、ATS 和登录直连需在 Mac/iPhone 上验收，不能根据 Android 结果承诺可用。
+正式版归档前执行 `npm run config:public` 和 `npm run config:check:release`；测试版归档前执行 `npm run config:test` 和 `npm run config:check`，在 Xcode 选择真实设备/通用 iOS 设备、Release 和 Product → Archive，再通过 Organizer 按证书配置导出或分发。没有在 Windows 生成可安装 IPA 的脚本。开发签名的 Release 配置可安装到已注册的 iPhone 上做真机验收，商店分发使用独立的归档和签名流程。
+
+iOS 真机验收用已知语音样本依次验证录制与保存、原声播放、通过系统「文件」导出、导入音频、提交会议转写以及打开已保存的结果。会议 WAV 的原生输出位于 iOS 应用容器的临时目录，准备和提交使用同一目录规则。Android 继续校验其应用缓存目录。测试新版本时优先覆盖安装，避免卸载清除本机录音。
+
+后台录音单独验收。开始录音后回到系统主屏或切换应用，返回 VINote 确认时间继续累计，再结束、播放原声并核对已保存时长。锁屏、来电或麦克风争用、进程被终止属于独立场景，需分别记录结果。生成会议纪要使用自己的任务生命周期，与后台录音的验证分开。
+
+## 应用图标
+
+安装 Pillow 后，在 App 项目根目录运行 `python scripts/generate-icons.py`，重新生成 iOS 图标目录和 Android 传统、适应性及主题图标。图标共用蓝底纸张与声波。iOS 使用无透明通道的方形资源，Android 使用系统遮罩。生成脚本可通过 `--desktop-source <路径>` 输出同一图形的透明圆角方形母版供桌面打包。
 
 ## 部署配置与公网
 

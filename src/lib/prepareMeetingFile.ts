@@ -1,6 +1,7 @@
 import FS from 'react-native-fs'
 import { NativeModules } from 'react-native'
 import { initialMeetingJob } from './meetingFileJobState'
+import { meetingWavCachePath } from './meetingWavCache'
 import type { MeetingFilePolicy } from './meetingFilePolicy'
 import type { MeetingFileCheckpoint } from './meetingFileWorkflow'
 
@@ -41,9 +42,8 @@ export async function prepareMeetingFile(input: Input): Promise<{ wavUri: string
   let wavPath = ''
   try {
     const wavUri: string = await audio.toWav(input.uri)
-    const candidate = wavUri.startsWith('file://') ? wavUri.slice(7) : ''
-    const cachePrefix = `${FS.CachesDirectoryPath}/asr-`
-    if (!candidate.startsWith(cachePrefix) || !/^[a-f0-9-]+\.wav$/i.test(candidate.slice(cachePrefix.length))) throw new Error('音频缓存路径无效')
+    const candidate = meetingWavCachePath(wavUri)
+    if (!candidate) throw new Error('音频缓存路径无效')
     wavPath = candidate
     await input.guard()
     const duration: number = await audio.wavInfo(wavUri)

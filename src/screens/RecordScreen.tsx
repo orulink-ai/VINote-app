@@ -196,14 +196,7 @@ export function RecordScreen({
       retainPending(record)
       const saved = await finalizeRecording(record)
       retainPending(null)
-      Alert.alert(
-        '录音已保存',
-        '现在生成会议纪要，或稍后处理。',
-        [
-          { text: '仅保存录音', onPress: () => onDone() },
-          { text: '生成会议纪要', onPress: () => onDone(saved.id) },
-        ],
-      )
+      onDone(saved.id)
     } catch (e) {
       Alert.alert('原录音保存未完成', e instanceof Error ? e.message : '请重试', [
         { text: '重试保存原录音', onPress: () => void finish() },
@@ -337,12 +330,6 @@ export function RecordScreen({
           onPress={recording ? stop : pending ? finish : start}
         />
         {operation === 'preparing' && <PrimaryButton secondary title="取消准备" onPress={cancelPreparation} />}
-        {recording && <PrimaryButton
-          tertiary
-          title="收起录音，返回工作台"
-          disabled={busy || !!pending}
-          onPress={onBack}
-        />}
       </View>
     </View>
   )
