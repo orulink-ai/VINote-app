@@ -38,6 +38,8 @@ jobs:
             android/app/src/main/java/com/vinoteapp/OriginalPathPolicy.java \
             scripts/native-tests/OriginalPathPolicyTest.java
           java -Xmx64m -cp "$path_test_classes" com.vinoteapp.OriginalPathPolicyTest "$path_test_classes"
+      - name: iOS framework metadata regression
+        run: python3 -m unittest discover -s scripts -p test_ios_framework_metadata.py
       - name: TypeScript
         run: node --max-old-space-size=256 node_modules/typescript/bin/tsc --noEmit
       - name: Offline Jest (one worker)

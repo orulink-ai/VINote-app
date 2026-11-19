@@ -119,3 +119,16 @@ python3 scripts/check-ios-symbols.py /path/to/VINote.xcarchive --hermes-binary i
 `react-native-share` 内置 Photos API 引用，因此 `Info.plist` 必须保留非空 `NSPhotoLibraryUsageDescription`，否则 Apple 后处理会以 ITMS-90683 拒绝构建。该声明不会自动请求授权；录音、转写与音频导出不依赖相册权限。发布前执行 `npm run test:scripts`，归档后同时检查包内 Info.plist 和 dSYM。
 
 Xcode 的 Upload succeeded 只表示传输成功。还需在 App Store Connect 的 TestFlight → iOS → Build Uploads 检查处理状态；Failed 构建不能用于 Beta 审核，必须修复并增加构建号重新上传。
+
+
+### Hermes 源码框架最低系统版本
+
+Hermes 源码构建的 CMake 框架可能缺失 `MinimumOSVersion`，Apple 上传验证会拒绝此包。必须在归档后、导出签名前运行：
+
+```sh
+python3 scripts/check-ios-framework-metadata.py /path/to/VINote.xcarchive --repair-hermes-minimum-os
+```
+
+脚本从真实 Mach-O `LC_BUILD_VERSION` 读取唯一 iOS 最低系统版本，只补齐未签名归档中 Hermes 缺失的字段；已有冲突值、非 iOS 或多架构歧义都会拒绝，其他框架不会自动修改。随后去掉修复选项执行同一命令只读复检，再进行 dSYM 校验和 Xcode 导出。不能在已经签名的 IPA 内修改声明。
+
+脚本回归：`python3 -m unittest discover -s scripts -p test_ios_framework_metadata.py`。
