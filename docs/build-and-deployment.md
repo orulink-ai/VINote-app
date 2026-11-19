@@ -98,4 +98,17 @@ All embedded APK/AAB entry points require explicit content and integration URLs 
 
 ## iOS 外部 TestFlight 标识
 
-正式 iOS 标识为 `com.orulink.vinote`，开发标识为 `com.orulink.vinote.dev`，开发者团队为 `LP4D78XZ45`。两者保持独立的安装数据。App Store Connect 的 VINote 应用记录为 `6836608504`，外部 TestFlight 仍需构建上传与 Beta 审核。iOS 当前归档版本为 0.1.5，构建号为 6。
+正式 iOS 标识为 `com.orulink.vinote`，开发标识为 `com.orulink.vinote.dev`，开发者团队为 `LP4D78XZ45`。两者保持独立的安装数据。App Store Connect 的 VINote 应用记录为 `6836608504`，外部 TestFlight 仍需构建上传与 Beta 审核。iOS 当前归档版本为 0.1.5，构建号为 7。
+
+
+## iOS 发布符号校验
+
+Podfile 固定从源码构建 React Native 核心、依赖与 Hermes，确保归档可以保留调试信息。已有预编译 Pods 的工作区切换时，执行 `pod update DoubleConversion glog boost fast_float fmt RCT-Folly SocketRocket hermes-engine --no-repo-update`，以刷新旧的 facade podspec 缓存。
+
+归档后，在 App 项目目录执行以下命令，收集与归档二进制 UUID 相同的 Hermes 符号，并检查所有内置可执行文件的 dSYM。检查失败时先修复符号，随后再导出或上传。
+
+```sh
+python3 scripts/check-ios-symbols.py /path/to/VINote.xcarchive --hermes-binary ios/Pods/hermes-engine/build/iphoneos/lib/hermesvm.framework/hermesvm
+```
+
+同一归档已收集 Hermes 符号时，后续只运行 `python3 scripts/check-ios-symbols.py /path/to/VINote.xcarchive` 做只读验证。

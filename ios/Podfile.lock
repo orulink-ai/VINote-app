@@ -34,8 +34,12 @@ PODS:
   - fmt (12.1.0)
   - glog (0.3.5)
   - hermes-engine (250829098.0.17):
-    - hermes-engine/Pre-built (= 250829098.0.17)
-  - hermes-engine/Pre-built (250829098.0.17)
+    - hermes-engine/cdp (= 250829098.0.17)
+    - hermes-engine/Hermes (= 250829098.0.17)
+    - hermes-engine/Public (= 250829098.0.17)
+  - hermes-engine/cdp (250829098.0.17)
+  - hermes-engine/Hermes (250829098.0.17)
+  - hermes-engine/Public (250829098.0.17)
   - NitroModules (0.36.5):
     - boost
     - DoubleConversion
@@ -2845,6 +2849,8 @@ PODS:
     - SocketRocket
     - Yoga
   - SocketRocket (0.7.1)
+  - VINoteSpeakers (1.12.35):
+    - React-Core
   - Yoga (0.0.0)
 
 DEPENDENCIES:
@@ -2939,6 +2945,7 @@ DEPENDENCIES:
   - RNScreens (from `../node_modules/react-native-screens`)
   - RNShare (from `../node_modules/react-native-share`)
   - SocketRocket (~> 0.7.1)
+  - VINoteSpeakers (from `.`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 SPEC REPOS:
@@ -3125,6 +3132,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-screens"
   RNShare:
     :path: "../node_modules/react-native-share"
+  VINoteSpeakers:
+    :path: "."
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
@@ -3136,7 +3145,7 @@ SPEC CHECKSUMS:
   FBLazyVector: 597d128734da0b1984972847ae6744e8df905369
   fmt: 530618a01105dae0fa3a2f27c81ae11fa8f67eac
   glog: e56ede4028c4b7418e6b1195a36b1656bb35e225
-  hermes-engine: 63c5db7d529c36335fada6582fd293ae2a105d77
+  hermes-engine: 105de5d0d75f77421bd9add910268e4412e901e8
   NitroModules: d629612ad7710b71bc5eaf306d04a3e6cb36ebdb
   NitroSound: 8709c3166718a4627b74bf16e25d04199b7889ed
   RCT-Folly: 36c4f904fb6cd0219dcb76b94e9502d2a72fab0b
@@ -3219,8 +3228,9 @@ SPEC CHECKSUMS:
   RNScreens: 23db5b8a8083076284aca24aa56b14d915d10308
   RNShare: 4ef2020cbdf6917d16ddedb22c7d06ab04e50ed9
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
+  VINoteSpeakers: 8d0d73e4f70908b5c8093054ea0aa7ed5c848ad8
   Yoga: 9ddcb167a9925a24e745b8548de3b77c69828931
 
-PODFILE CHECKSUM: 2915f1df83e215eb19c28ab0da6f664ad39fd6ad
+PODFILE CHECKSUM: 1535765d7abcdebf6025c13b050cd429651b986e
 
 COCOAPODS: 1.16.2

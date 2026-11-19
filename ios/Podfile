@@ -1,3 +1,8 @@
+# Archive native dependencies with debug information instead of stripped prebuilts.
+ENV['RCT_USE_PREBUILT_RNCORE'] = '0'
+ENV['RCT_USE_RN_DEP'] = '0'
+ENV['RCT_BUILD_HERMES_FROM_SOURCE'] = 'true'
+
 # Resolve react_native_pods.rb with node to allow for hoisting
 require Pod::Executable.execute_command('node', ['-p',
   'require.resolve(
