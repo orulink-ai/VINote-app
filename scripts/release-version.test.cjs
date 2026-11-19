@@ -34,3 +34,16 @@ test('iOS release identity matches the registered VINote application', () => {
   assert.ok(ios.includes('DEVELOPMENT_TEAM = LP4D78XZ45;'))
   assert.ok(!ios.includes('org.reactjs.native.example.'))
 })
+
+test('declared iPad support includes the required home screen icon sizes', () => {
+  const folder = path.join(__dirname, '..', 'ios/VINoteApp/Images.xcassets/AppIcon.appiconset')
+  const manifest = JSON.parse(fs.readFileSync(path.join(folder, 'Contents.json'), 'utf8'))
+  for (const pixels of [152, 167]) {
+    const icon = manifest.images.find(image => image.idiom === 'ipad' &&
+      Number(image.size.split('x')[0]) * Number(image.scale.slice(0, -1)) === pixels)
+    assert.ok(icon, 'Missing required iPad icon at ' + pixels + 'px')
+    const png = fs.readFileSync(path.join(folder, icon.filename))
+    assert.equal(png.readUInt32BE(16), pixels)
+    assert.equal(png.readUInt32BE(20), pixels)
+  }
+})
