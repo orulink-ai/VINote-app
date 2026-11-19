@@ -98,7 +98,7 @@ All embedded APK/AAB entry points require explicit content and integration URLs 
 
 ## iOS 外部 TestFlight 标识
 
-正式 iOS 标识为 `com.orulink.vinote`，开发标识为 `com.orulink.vinote.dev`，开发者团队为 `LP4D78XZ45`。两者保持独立的安装数据。App Store Connect 的 VINote 应用记录为 `6836608504`，外部 TestFlight 仍需构建上传与 Beta 审核。iOS 当前归档版本为 0.1.5，构建号为 7。
+正式 iOS 标识为 `com.orulink.vinote`，开发标识为 `com.orulink.vinote.dev`，开发者团队为 `LP4D78XZ45`。两者保持独立的安装数据。App Store Connect 的 VINote 应用记录为 `6836608504`，外部 TestFlight 仍需构建上传与 Beta 审核。iOS 当前归档版本为 0.1.5，构建号为 8。
 
 
 ## iOS 发布符号校验
@@ -112,3 +112,10 @@ python3 scripts/check-ios-symbols.py /path/to/VINote.xcarchive --hermes-binary i
 ```
 
 同一归档已收集 Hermes 符号时，后续只运行 `python3 scripts/check-ios-symbols.py /path/to/VINote.xcarchive` 做只读验证。
+
+
+### Apple 上传后处理检查
+
+`react-native-share` 内置 Photos API 引用，因此 `Info.plist` 必须保留非空 `NSPhotoLibraryUsageDescription`，否则 Apple 后处理会以 ITMS-90683 拒绝构建。该声明不会自动请求授权；录音、转写与音频导出不依赖相册权限。发布前执行 `npm run test:scripts`，归档后同时检查包内 Info.plist 和 dSYM。
+
+Xcode 的 Upload succeeded 只表示传输成功。还需在 App Store Connect 的 TestFlight → iOS → Build Uploads 检查处理状态；Failed 构建不能用于 Beta 审核，必须修复并增加构建号重新上传。

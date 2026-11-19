@@ -47,3 +47,10 @@ test('declared iPad support includes the required home screen icon sizes', () =>
     assert.equal(png.readUInt32BE(20), pixels)
   }
 })
+
+// RNShare links Photos APIs even when the app only uses its system share sheet.
+test('iOS declares a nonempty photo-library purpose for the linked sharing SDK', () => {
+  const plist = read('ios/VINoteApp/Info.plist')
+  const purpose = plist.match(/<key>NSPhotoLibraryUsageDescription<\/key>\s*<string>([^<]+)<\/string>/)?.[1]
+  assert.ok(purpose?.trim(), 'Apple ITMS-90683: missing photo-library purpose string')
+})
