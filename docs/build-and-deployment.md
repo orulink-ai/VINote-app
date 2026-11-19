@@ -95,3 +95,7 @@ Android versionName / npm / iOS MARKETING_VERSION: **0.1.4**; Android versionCod
 The LAN standalone APK combines direct LAN model access with public authentication, content processing and Feishu. Link/upload notes execute on the public content backend, whose model origin is configured server-side; this is not an all-LAN package. Public APKs use the public model origin too.
 
 All embedded APK/AAB entry points require explicit content and integration URLs before invoking native build commands, including direct Gradle `-PvinoteStandalone=true`. Release additionally requires the public channel and release signing. `npm run config:check:release` checks the public channel and both service URLs without building; signing credentials are checked by Gradle. Metro development retains its loopback content service. See [0.1.4](releases/0.1.4.md). 本次仅离线测试，未重新构建、安装或验收两包。
+
+## iOS 外部 TestFlight 标识
+
+正式 iOS 标识为 `com.orulink.vinote`，开发标识为 `com.orulink.vinote.dev`，开发者团队为 `LP4D78XZ45`。两者保持独立的安装数据。App Store Connect 的 VINote 应用记录为 `6836608504`，外部 TestFlight 仍需构建上传与 Beta 审核。iOS 当前归档版本为 0.1.5，构建号为 6。

@@ -27,3 +27,10 @@ test('Android package versions agree and iOS retains its separately released ver
   assert.ok(plist.includes('$(MARKETING_VERSION)'))
   assert.ok(plist.includes('$(CURRENT_PROJECT_VERSION)'))
 })
+
+test('iOS release identity matches the registered VINote application', () => {
+  const ios = read('ios/VINoteApp.xcodeproj/project.pbxproj')
+  assert.ok(ios.includes('PRODUCT_BUNDLE_IDENTIFIER = com.orulink.vinote;'))
+  assert.ok(ios.includes('DEVELOPMENT_TEAM = LP4D78XZ45;'))
+  assert.ok(!ios.includes('org.reactjs.native.example.'))
+})
