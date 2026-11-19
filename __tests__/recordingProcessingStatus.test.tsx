@@ -69,10 +69,11 @@ test('submission percentage and durable final seconds display independently', as
   expect(text()).toContain('最终转写待确认'); expect(text()).not.toContain('已完成并保存')
 })
 
-test('unstarted recording branches stay waiting and never claim completion', async () => {
-  await mount()
-  expect(text()).toContain('提交识别的音频'); expect(text()).toContain('识别说话人')
-  expect(text().match(/等待开始/g)).toHaveLength(2)
+test('unstarted recording shows its saved state without processing rows', async () => {
+  await mount(undefined, { ...record, generation: undefined })
+  expect(text()).toContain('录音已保存，可以生成纪要')
+  expect(text()).not.toContain('提交识别的音频'); expect(text()).not.toContain('识别说话人')
+  expect(text()).not.toContain('等待开始')
   expect(text()).not.toContain('已完成'); expect(text()).not.toContain('100%')
   expect(view.root.findAllByType(ProcessingProgress)).toHaveLength(0)
 })

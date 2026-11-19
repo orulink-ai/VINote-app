@@ -92,7 +92,9 @@ export function RecordingProcessingStatus({ record, progress, working, phase, no
     : Number.isFinite(duration) && duration! > 0 ? `已确认并保存的转写区间：${Math.floor(savedSeconds)}/${Math.ceil(duration!)} 秒` : ''
   const compactPhase = phaseText.split('\n')[0].replace(/^转写：/, '')
   const compactDetail = compactPhase.startsWith(title) ? compactPhase.slice(title.length).replace(/^[\s·：:]+/, '') : compactPhase
-  if (compact) return <View style={{ gap: 10 }}>
+  const awaitingGeneration = !active && !noteSaved && !record.error && !record.generation &&
+    !record.meetingFilePrepared && !record.transcriptionCheckpoint && !record.speakerCheckpoint && !record.transcript
+  if (compact || awaitingGeneration) return <View style={{ gap: 10 }}>
     <Text accessibilityLiveRegion="polite" style={[styles.subtitle, { color: record.error && !active ? colors.danger : noteSaved && !active ? colors.success : colors.muted }]}>{title}</Text>
     {active && !!compactDetail && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>{compactDetail}</Text>}
     {children}

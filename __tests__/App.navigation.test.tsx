@@ -14,6 +14,7 @@ import { FileLibraryScreen } from '../src/screens/FileLibraryScreen'
 import { SettingsScreen } from '../src/screens/SettingsScreen'
 import { ConnectionsScreen } from '../src/screens/ConnectionsScreen'
 import { NoteIntakeScreen } from '../src/screens/NoteIntakeScreen'
+import { RecordScreen } from '../src/screens/RecordScreen'
 import { RecordingsScreen } from '../src/screens/RecordingsScreen'
 
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaProvider: ({ children }: any) => children, SafeAreaView: ({ children }: any) => children, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }))
@@ -38,7 +39,14 @@ jest.mock('../src/screens/FileLibraryScreen', () => ({ FileLibraryScreen: () => 
 jest.mock('../src/screens/SettingsScreen', () => ({ SettingsScreen: () => null }))
 jest.mock('../src/screens/ConnectionsScreen', () => ({ ConnectionsScreen: () => null }))
 jest.mock('../src/screens/NoteIntakeScreen', () => ({ NoteIntakeScreen: () => null }))
-jest.mock('../src/screens/RecordingsScreen', () => ({ RecordingsScreen: () => { const { ScreenHeader } = require('../src/components/ScreenHeader'); return <ScreenHeader title="会议" /> } }))
+jest.mock('../src/screens/RecordScreen', () => ({ RecordScreen: () => null }))
+jest.mock('../src/screens/RecordingsScreen', () => ({
+  RecordingsScreen: ({ initialFocusId }: { initialFocusId?: string }) => {
+    const { ScreenHeader } = require('../src/components/ScreenHeader')
+    const [focusedId] = require('react').useState(initialFocusId)
+    return <ScreenHeader title={focusedId ? '会议详情' : '会议'} />
+  },
+}))
 jest.mock('../src/components/GlobalTaskStatus', () => ({ GlobalTaskStatus: () => null }))
 jest.mock('react-native-nitro-sound', () => ({ __esModule: true, default: {} }))
 jest.mock('react-native-keychain', () => ({ getGenericPassword: jest.fn(async () => false), setGenericPassword: jest.fn(), resetGenericPassword: jest.fn() }))
@@ -248,5 +256,19 @@ it('drops an old delivery intent after an account ABA instead of navigating to o
   await act(async () => delayedBack())
   expect(app.root.findAllByType(NoteDetailScreen)).toHaveLength(0)
   expect(app.root.findByType(ConnectionsScreen)).toBeDefined()
+  await act(async () => app.unmount())
+})
+
+it('opens the exact saved recording without automatically opening model confirmation', async () => {
+  let app!: Renderer.ReactTestRenderer
+  await act(async () => { app = Renderer.create(<App />) })
+  await act(async () => app.root.findByType(RecordingsScreen).props.onRecord())
+  await act(async () => app.root.findByType(RecordScreen).props.onDone('saved-original'))
+  const recording = app.root.findByType(RecordingsScreen)
+  expect(recording.props.initialFocusId).toBe('saved-original')
+  expect(recording.props.initialGenerateId).toBeUndefined()
+  expect(recording.props.backLabel).toBe('返回会议')
+  await act(async () => recording.props.onBack())
+  expect(app.root.findByType(RecordingsScreen).findByType(require('../src/components/ScreenHeader').ScreenHeader).props.title).toBe('会议')
   await act(async () => app.unmount())
 })

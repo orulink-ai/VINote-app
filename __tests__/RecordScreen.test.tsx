@@ -9,7 +9,7 @@ jest.mock('../src/features/recording/recordingService', () => ({ startRecording:
 jest.mock('../src/features/recording/recordingLibrary', () => ({ saveRecording: jest.fn(async value => value), finalizeRecording: jest.fn(async value => value), createRecordingDraft: jest.fn(async () => ({ id: 'test-1', uri: 'file:///documents/recordings/test-1.m4a', title: '¼��', createdAt: new Date().toISOString(), duration: 0 })) }))
 beforeEach(() => jest.clearAllMocks())
 afterEach(() => jest.restoreAllMocks())
-test('recording saves original before offering post-recording choices', async () => {
+test('recording saves the original before opening its detail directly', async () => {
   const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {})
   const done = jest.fn()
   let view!: Renderer.ReactTestRenderer
@@ -19,9 +19,9 @@ test('recording saves original before offering post-recording choices', async ()
   expect(recording.stopRecording).not.toHaveBeenCalled()
   await act(async () => { await alert.mock.calls.at(-1)![2]![1].onPress!() })
   expect(finalizeRecording).toHaveBeenCalledWith(expect.objectContaining({ id: 'test-1', uri: 'file:///documents/recordings/test-1.m4a' }))
-  expect(alert.mock.calls.at(-1)![0]).toBe('录音已保存')
-  expect(done).not.toHaveBeenCalled()
-  await act(async () => { alert.mock.calls.at(-1)![2]![1].onPress!() })
+  expect(alert).toHaveBeenCalledTimes(1)
+  expect(finalizeRecording).toHaveBeenCalledTimes(1)
+  expect(jest.mocked(finalizeRecording).mock.invocationCallOrder[0]).toBeLessThan(done.mock.invocationCallOrder[0])
   expect(done).toHaveBeenCalledWith('test-1')
   await act(async () => view.unmount())
 })
@@ -65,7 +65,7 @@ test('save retry reuses the stopped original even from the first failure alert',
   expect(recording.stopRecording).toHaveBeenCalledTimes(1)
   expect(finalizeRecording).toHaveBeenCalledTimes(2)
   expect(jest.mocked(finalizeRecording).mock.calls[1][0]).toBe(jest.mocked(finalizeRecording).mock.calls[0][0])
-  expect(alert.mock.calls.at(-1)![0]).toBe('录音已保存')
+  expect(alert.mock.calls.at(-1)![0]).not.toBe('录音已保存')
   await act(async () => view.unmount())
 })
 
@@ -127,6 +127,6 @@ test('an unconfirmed native stop keeps controls and never offers saved content',
   await act(async () => { button('结束录音').props.onPress(); await alert.mock.calls.at(-1)![2]![1].onPress!() })
   expect(recording.stopRecording).toHaveBeenCalledTimes(2)
   expect(finalizeRecording).toHaveBeenCalledTimes(1)
-  expect(alert.mock.calls.at(-1)![0]).toBe('录音已保存')
+  expect(alert.mock.calls.at(-1)![0]).not.toBe('录音已保存')
   await act(async () => view.unmount())
 })

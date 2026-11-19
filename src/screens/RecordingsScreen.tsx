@@ -199,22 +199,10 @@ export function RecordingsScreen({
     void (async () => {
       try {
         const record = await importRecording()
-        if (record && uiCurrent())
-          Alert.alert(
-            '音频已保存',
-            '录音已保存。现在生成会议纪要，也可以稍后处理。',
-            [
-              { text: '仅保存音频' },
-              {
-                text: '生成会议纪要',
-                onPress: () => {
-                  if (!uiCurrent()) return
-                  setModelsReady(false)
-                  setSelected(record.id)
-                },
-              },
-            ],
-          )
+        if (record && uiCurrent()) {
+          setItems(current => [record, ...current.filter(item => item.id !== record.id)])
+          setFocusedId(record.id)
+        }
       } catch (e) {
         if (uiCurrent()) Alert.alert(
           '导入失败',
